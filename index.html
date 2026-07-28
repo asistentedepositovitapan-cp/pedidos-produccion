@@ -1,0 +1,806 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="theme-color" content="#8a5a34">
+<title>Pedidos de Producción · VitaPan</title>
+<link rel="manifest" href="manifest.json">
+<link rel="icon" href="icons/icon-192.png">
+<link rel="apple-touch-icon" href="icons/icon-192.png">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.8.2/jspdf.plugin.autotable.min.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-auth-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore-compat.js"></script>
+<style>
+  :root{
+    --masa:#fbf6ee;
+    --miga:#f0e6d6;
+    --corteza:#8a5a34;
+    --corteza-dark:#5f3c1f;
+    --tinta:#2b2117;
+    --acento:#c76b3f;
+    --acento-suave:#f4d9c6;
+    --ok:#5c7a4a;
+    --linea:#e2d3ba;
+    --sombra: 0 1px 3px rgba(43,33,23,0.08);
+  }
+  *{box-sizing:border-box;}
+  body{
+    margin:0;
+    font-family:'Segoe UI', system-ui, -apple-system, sans-serif;
+    background:var(--masa);
+    color:var(--tinta);
+    padding-bottom:90px;
+  }
+  header{
+    background:var(--corteza);
+    color:#fff;
+    padding:14px 16px 10px;
+    position:sticky;
+    top:0;
+    z-index:20;
+    box-shadow:0 2px 6px rgba(0,0,0,0.15);
+  }
+  header h1{
+    margin:0 0 2px;
+    font-size:1.05rem;
+    font-weight:700;
+    letter-spacing:.2px;
+  }
+  header .sub{
+    font-size:.72rem;
+    opacity:.85;
+    margin-bottom:10px;
+  }
+  .date-row{
+    display:flex;
+    align-items:center;
+    gap:8px;
+    background:rgba(255,255,255,0.12);
+    border-radius:10px;
+    padding:6px 10px;
+  }
+  .date-row label{font-size:.75rem;opacity:.9;}
+  .date-row input[type=date]{
+    border:none;
+    border-radius:6px;
+    padding:5px 8px;
+    font-size:.85rem;
+    background:#fff;
+    color:var(--tinta);
+    flex:1;
+  }
+  .status-pill{
+    font-size:.68rem;
+    background:rgba(255,255,255,0.18);
+    padding:3px 8px;
+    border-radius:20px;
+    white-space:nowrap;
+  }
+  nav.tabs{
+    display:flex;
+    overflow-x:auto;
+    gap:6px;
+    padding:10px 12px 0;
+    background:var(--corteza);
+    scrollbar-width:none;
+  }
+  nav.tabs::-webkit-scrollbar{display:none;}
+  nav.tabs button{
+    flex:0 0 auto;
+    border:none;
+    background:rgba(255,255,255,0.14);
+    color:#fff;
+    padding:9px 14px;
+    border-radius:10px 10px 0 0;
+    font-size:.82rem;
+    font-weight:600;
+    cursor:pointer;
+    opacity:.75;
+  }
+  nav.tabs button.active{
+    background:var(--masa);
+    color:var(--corteza-dark);
+    opacity:1;
+  }
+  main{padding:12px;}
+  .search-row{
+    display:flex;
+    flex-wrap:wrap;
+    gap:8px;
+    margin-bottom:12px;
+  }
+  .search-row input{
+    flex:1;
+    padding:10px 12px;
+    border-radius:10px;
+    border:1px solid var(--linea);
+    font-size:.9rem;
+    background:#fff;
+  }
+  .summary-btn{
+    border:1px solid var(--corteza);
+    background:#fff;
+    color:var(--corteza-dark);
+    border-radius:10px;
+    padding:0 14px;
+    font-size:.8rem;
+    font-weight:600;
+    cursor:pointer;
+  }
+  .section{
+    margin-bottom:16px;
+    background:#fff;
+    border-radius:12px;
+    box-shadow:var(--sombra);
+    overflow:hidden;
+    border:1px solid var(--linea);
+  }
+  .section-title{
+    background:var(--miga);
+    padding:9px 12px;
+    font-size:.78rem;
+    font-weight:700;
+    color:var(--corteza-dark);
+    text-transform:uppercase;
+    letter-spacing:.3px;
+  }
+  .day-label{
+    padding:6px 12px;
+    font-size:.72rem;
+    font-style:italic;
+    color:var(--acento);
+    background:var(--acento-suave);
+    border-top:1px solid var(--linea);
+    border-bottom:1px solid var(--linea);
+  }
+  .prod-row{
+    display:flex;
+    align-items:center;
+    gap:8px;
+    padding:8px 12px;
+    border-top:1px solid var(--linea);
+  }
+  .prod-row:first-of-type{border-top:none;}
+  .prod-name{
+    flex:1;
+    font-size:.85rem;
+    line-height:1.25;
+  }
+  .prod-row input[type=number]{
+    width:56px;
+    padding:6px 4px;
+    text-align:center;
+    border:1px solid var(--linea);
+    border-radius:8px;
+    font-size:.85rem;
+  }
+  .prod-row input[type=number]:focus{
+    outline:2px solid var(--acento);
+    border-color:var(--acento);
+  }
+  .field-wrap{display:flex;flex-direction:column;align-items:center;gap:2px;}
+  .field-wrap span{font-size:.6rem;color:#8a7a63;font-weight:600;}
+  .prod-row.has-pedido{background:#fbf3ea;}
+  .hidden{display:none !important;}
+  footer.bar{
+    position:fixed;
+    bottom:0;left:0;right:0;
+    background:#fff;
+    border-top:1px solid var(--linea);
+    padding:10px 14px;
+    display:flex;
+    justify-content:space-between;
+    align-items:center;
+    font-size:.78rem;
+    box-shadow:0 -2px 8px rgba(0,0,0,0.08);
+    z-index:15;
+  }
+  footer.bar .save-state{color:var(--ok);font-weight:600;}
+  .modal-overlay{
+    position:fixed;inset:0;background:rgba(43,33,23,0.55);
+    display:flex;align-items:flex-end;justify-content:center;
+    z-index:50;
+  }
+  .modal{
+    background:#fff;
+    width:100%;
+    max-width:520px;
+    max-height:80vh;
+    overflow-y:auto;
+    border-radius:16px 16px 0 0;
+    padding:16px;
+  }
+  .modal h2{margin:0 0 4px;font-size:1rem;color:var(--corteza-dark);}
+  .modal .modal-sub{font-size:.75rem;color:#8a7a63;margin-bottom:10px;}
+  .modal ul{list-style:none;margin:0;padding:0;}
+  .modal li{
+    display:flex;justify-content:space-between;
+    padding:7px 0;border-bottom:1px solid var(--linea);
+    font-size:.85rem;
+  }
+  .modal li b{color:var(--acento);}
+  .modal .cat-h{font-weight:700;color:var(--corteza-dark);margin-top:10px;font-size:.8rem;text-transform:uppercase;}
+  .modal-close{
+    display:block;width:100%;margin-top:14px;
+    padding:11px;border:none;border-radius:10px;
+    background:var(--corteza);color:#fff;font-weight:600;font-size:.85rem;
+  }
+  .empty-msg{padding:24px 12px;text-align:center;color:#a4917a;font-size:.85rem;}
+</style>
+</head>
+<body>
+
+<div id="loginOverlay" class="modal-overlay" style="align-items:center;">
+  <div class="modal" style="border-radius:16px; max-width:340px;">
+    <h2>🥖 Pedidos de Producción</h2>
+    <div class="modal-sub">Iniciá sesión para cargar o revisar pedidos</div>
+    <form id="loginForm" style="display:flex; flex-direction:column; gap:10px; margin-top:10px;">
+      <input type="email" id="loginEmail" placeholder="Correo" required autocomplete="username" style="padding:10px;border:1px solid var(--linea);border-radius:8px;font-size:.9rem;">
+      <input type="password" id="loginPass" placeholder="Contraseña" required autocomplete="current-password" style="padding:10px;border:1px solid var(--linea);border-radius:8px;font-size:.9rem;">
+      <div id="loginError" style="color:#b23b3b;font-size:.78rem;min-height:14px;"></div>
+      <button type="submit" class="modal-close" style="margin-top:0;">Entrar</button>
+    </form>
+  </div>
+</div>
+
+<header>
+  <h1>🥖 Pedidos de Producción</h1>
+  <div class="sub">VitaPan · Panadería · Confitería · Rotisería</div>
+  <div class="date-row">
+    <label for="fecha">Fecha:</label>
+    <input type="date" id="fecha">
+    <span class="status-pill" id="statusPill">conectando…</span>
+  </div>
+  <div class="date-row" style="margin-top:6px;">
+    <span id="userBadge" style="font-size:.72rem;opacity:.85;flex:1;"></span>
+    <button id="btnLogout" style="border:none;background:rgba(255,255,255,0.18);color:#fff;border-radius:8px;padding:5px 10px;font-size:.7rem;cursor:pointer;">Salir</button>
+  </div>
+</header>
+
+<nav class="tabs" id="tabs"></nav>
+
+<main>
+  <div class="search-row">
+    <input type="text" id="buscador" placeholder="Buscar producto en esta pestaña...">
+    <button class="summary-btn" id="btnResumen">Ver resumen</button>
+    <button class="summary-btn" id="btnPDF">PDF</button>
+    <button class="summary-btn" id="btnCombinado">Combinar 2</button>
+  </div>
+  <div id="contenido"></div>
+</main>
+
+<footer class="bar">
+  <span id="footerCount">0 productos con pedido</span>
+  <span class="save-state" id="footerSave">✓ sincronizado</span>
+</footer>
+
+<div id="modalRoot"></div>
+
+<script>
+// =====================================================================
+// CONFIGURACIÓN DE FIREBASE — reemplazá estos valores por los de tu
+// propio proyecto (Firebase Console > Configuración del proyecto >
+// Tus apps > SDK setup and configuration > Config). No es información
+// secreta, es seguro que quede visible en el código del navegador.
+// =====================================================================
+const firebaseConfig = {
+  apiKey: "AIzaSyC5asHH8K8_IZyQQ5syYmyLjEHAcok9yeA",
+  authDomain: "vitapan-pedidos-produccion.firebaseapp.com",
+  projectId: "vitapan-pedidos-produccion",
+  storageBucket: "vitapan-pedidos-produccion.firebasestorage.app",
+  messagingSenderId: "398452460976",
+  appId: "1:398452460976:web:02f256ca6acde440fc9a75"
+};
+
+firebase.initializeApp(firebaseConfig);
+const auth = firebase.auth();
+const db = firebase.firestore();
+try{ db.enablePersistence({ synchronizeTabs: true }); }catch(e){ /* ok si ya estaba habilitado en otra pestaña */ }
+
+const CATALOG = {"Medialunas":[{"title":"MEDIALUNAS ESPECIALES / POR KILO","items":[{"type":"day","label":"Con crema pastelera (3 dias)"},{"type":"product","name":"DANESAS CON CREMA","id":"med_000"},{"type":"product","name":"DANESAS CON DDG","id":"med_001"},{"type":"product","name":"DE HOJALDRE","id":"med_002"},{"type":"product","name":"MEDIALUNAS DE CREMA","id":"med_003"},{"type":"product","name":"MOÑITOS DE FRUTILLA","id":"med_004"},{"type":"product","name":"MOÑITOS DE DDL","id":"med_005"},{"type":"product","name":"VIENESAS","id":"med_006"},{"type":"product","name":"VIGILANTES","id":"med_007"},{"type":"day","label":"Sin crema pastelera (4 dias)"},{"type":"product","name":"BORRACHITOS","id":"med_008"},{"type":"product","name":"DE BATATA","id":"med_009"},{"type":"product","name":"MEDIALUNAS DDL","id":"med_010"},{"type":"product","name":"MEDIALUNAS DDG","id":"med_011"},{"type":"product","name":"MINI MEDIALUNAS","id":"med_012"},{"type":"product","name":"MINI VIGILANTES","id":"med_013"},{"type":"product","name":"ROLL DE CANELA","id":"med_014"},{"type":"day","label":"MEDIALUNAS CLÁSICAS / UNIDAD (4 dias)"},{"type":"product","name":"MEDIALUNAS SIN RELLENO","id":"med_015"},{"type":"day","label":"MEDIALUNAS EXTRA FINAS / POR KILO (4 dias)"},{"type":"product","name":"MEDIALUNAS DE NUTELLA","id":"med_016"},{"type":"product","name":"MEDIALUNAS DE CHOCOLATE","id":"med_017"},{"type":"product","name":"MEDIALUNAS DE DURAZNO","id":"med_018"},{"type":"day","label":"NUEVOS PRODUCTOS"},{"type":"day","label":"(Se produce: martes y viernes) (Se pide: LUNES Y JUEVES)"},{"type":"product","name":"BOLLO RELLENO DDL (5 dias)","id":"med_019"},{"type":"product","name":"BOLLO RELLENO DDG (5 dias)","id":"med_020"},{"type":"product","name":"BOLLO RELLENO DE CREMA (3 dias)","id":"med_021"},{"type":"product","name":"MINI BOLLOS (9 unidades /por paquete)(6 dias)","id":"med_022"},{"type":"product","name":"DONAS (6 dias)","id":"med_023"},{"type":"product","name":"MINI DONAS (6 dias)","id":"med_024"},{"type":"product","name":"PAN DE COCO (7 dias)","id":"med_025"}]}],"Rotisería":[{"title":"MINUTAS","items":[{"type":"product","name":"Chipa so´o","id":"rot_000"},{"type":"product","name":"Croquetas","id":"rot_001"},{"type":"product","name":"Empanada chilena","id":"rot_002"},{"type":"product","name":"Empanada de carne","id":"rot_003"},{"type":"product","name":"Empanada de jamon y queso","id":"rot_004"},{"type":"product","name":"Empanada de pollo","id":"rot_005"}]},{"title":"BOCADITOS COMUNES","items":[{"type":"product","name":"Empanadaditas de pollo","id":"rot_006"},{"type":"product","name":"Empanaditas de carne","id":"rot_007"},{"type":"product","name":"Empanaditas de jamon y queso","id":"rot_008"},{"type":"product","name":"Bolitas de queso","id":"rot_009"}]},{"title":"SANDWICHES","items":[{"type":"product","name":"Jamon y queso / blanco","id":"rot_010"},{"type":"product","name":"Jamon y queso / integral","id":"rot_011"},{"type":"product","name":"Verduras / blanco","id":"rot_012"},{"type":"product","name":"Verduras / integral","id":"rot_013"},{"type":"product","name":"Carne fria","id":"rot_014"},{"type":"day","label":"PEDIR:          Domingos y Miércoles"}]},{"title":"Combo Paraguay (en temporada)","items":[{"type":"product","name":"Bolita de mandioca","id":"rot_015"},{"type":"product","name":"Chipa so´o","id":"rot_016"},{"type":"product","name":"Empanada de mandioca","id":"rot_017"},{"type":"product","name":"Payagua","id":"rot_018"}]},{"title":"según temporada","items":[{"type":"product","name":"Empanada de mandioca","id":"rot_019"},{"type":"product","name":"Payagua","id":"rot_020"},{"type":"day","label":"(Se produce LUNES Y JUEVES)"}]},{"title":"MINUTAS","items":[{"type":"product","name":"Empanada de choclo","id":"rot_021"},{"type":"product","name":"Empanada de Verduras","id":"rot_022"},{"type":"product","name":"Empanada Pollo al curry","id":"rot_023"},{"type":"product","name":"Chipa avati relleno queso","id":"rot_024"},{"type":"day","label":"(Se produce MARTES Y VIERNES)"}]},{"title":"BOCADITOS COMUNES","items":[{"type":"product","name":"Croquetitas","id":"rot_025"},{"type":"product","name":"Empanaditas de choclo","id":"rot_026"},{"type":"product","name":"Patitas de pollo","id":"rot_027"}]},{"title":"TARTAS INDIVIDUALES","items":[{"type":"product","name":"Pollo","id":"rot_028"},{"type":"product","name":"Choclo","id":"rot_029"}]},{"title":"SANDWICHES","items":[{"type":"product","name":"Remolacha, zanahoria y queso azul","id":"rot_030"},{"type":"day","label":"PEDIR:              Lunes y Jueves"}]},{"title":"MINUTAS","items":[{"type":"product","name":"Empanada de acelga","id":"rot_031"},{"type":"product","name":"Empanada de huevo","id":"rot_032"},{"type":"product","name":"Empanada de palmito","id":"rot_033"},{"type":"product","name":"Empanada de carne picante","id":"rot_034"},{"type":"product","name":"Chipa avati relleno acelga","id":"rot_035"},{"type":"day","label":"(Se produce MIERCOLES Y SÁBADO)"}]},{"title":"BOCADITOS ESPECIALES","items":[{"type":"product","name":"Acelga","id":"rot_036"},{"type":"product","name":"Chilena","id":"rot_037"},{"type":"product","name":"Palmito","id":"rot_038"}]},{"title":"TARTAS INDIVIDUALES","items":[{"type":"product","name":"Acelga","id":"rot_039"}]},{"title":"SANDWICHES","items":[{"type":"product","name":"Aceituna y queso","id":"rot_040"},{"type":"day","label":"PEDIR:                Martes y Viernes"}]},{"title":"MINUTAS","items":[{"type":"product","name":"Empanada de pollo picante","id":"rot_041"},{"type":"product","name":"Mini coxinha","id":"rot_042"},{"type":"product","name":"Villarroel de huevo","id":"rot_043"},{"type":"product","name":"Villarroel de pollo","id":"rot_044"},{"type":"product","name":"Croqueton de carne","id":"rot_045"},{"type":"product","name":"Croqueton de pollo","id":"rot_046"},{"type":"product","name":"Croqueton de queso","id":"rot_047"}]},{"title":"BOCADITOS TÍPICOS","items":[{"type":"product","name":"Chipa so´o","id":"rot_048"}]},{"title":"TARTAS INDIVIDUALES","items":[{"type":"product","name":"Jamon y queso","id":"rot_049"},{"type":"product","name":"Fugazza","id":"rot_050"}]},{"title":"SANDWICHES","items":[{"type":"product","name":"Atun y choclo","id":"rot_051"}]}],"Panadería":[{"title":"GALLETAS Y PAN FELIPE / KILO","items":[{"type":"day","label":"(Se produce todos los dias)"},{"type":"product","name":"Galleta criolla","id":"pan_000"},{"type":"product","name":"Cañoncito especial","id":"pan_001"},{"type":"product","name":"Galletón","id":"pan_002"},{"type":"product","name":"Galleta integral","id":"pan_003"},{"type":"product","name":"Pan felipe blanco","id":"pan_004"},{"type":"product","name":"Pan felipe integral","id":"pan_005"},{"type":"product","name":"Pan flauta o mini baguette","id":"pan_006"},{"type":"product","name":"Pan baguette largo / unidad","id":"pan_007"},{"type":"product","name":"Pan trincha","id":"pan_008"},{"type":"product","name":"Miñoncito blanco","id":"pan_009"},{"type":"product","name":"Miñoncito pre - cocido","id":"pan_010"},{"type":"day","label":"(Se producen lun - mier - vie) (Pedir: D - Ma - J)"},{"type":"product","name":"Pan ciabatta / unidad","id":"pan_011"},{"type":"product","name":"Pan ciabata mini / paq. 9 unid","id":"pan_012"},{"type":"product","name":"Galleta molida x kilo","id":"pan_013"},{"type":"product","name":"Pan arabe blanco / paq 2 uni","id":"pan_014"},{"type":"product","name":"Pan arabe integral / paq 2 uni","id":"pan_015"}]},{"title":"PRODUCTOS SECOS / KILO","items":[{"type":"day","label":"(Se produce todos los dias)"},{"type":"product","name":"Rosquita blanca paquetes","id":"pan_016"},{"type":"product","name":"Roscón x paq","id":"pan_017"},{"type":"day","label":"(Se produce martes y viernes) (Pedir: L - J)"},{"type":"product","name":"Rosquita integral paquetes","id":"pan_018"},{"type":"product","name":"Palito integral paq","id":"pan_019"},{"type":"day","label":"(Se produce lunes y jueves) (Pedir: D - Mi)"},{"type":"product","name":"Palitín en paquetes","id":"pan_020"},{"type":"product","name":"Palito blanco","id":"pan_021"},{"type":"product","name":"Rosquita con queso","id":"pan_022"},{"type":"day","label":"(Se produce miércoles y sábado) (Pedir: Ma - V)"},{"type":"product","name":"Coquito blanco en paquetes","id":"pan_023"},{"type":"product","name":"Coquitin en paquetes","id":"pan_024"},{"type":"day","label":"(Se produce miércoles) (Pedir: Martes)"},{"type":"product","name":"Grissines normal - naranja","id":"pan_025"},{"type":"product","name":"Grissines rojo - verde","id":"pan_026"},{"type":"product","name":"Palito con queso","id":"pan_027"},{"type":"product","name":"Palito picante parmesano","id":"pan_028"},{"type":"product","name":"Palito saborizado ajo y albahaca","id":"pan_029"}]},{"title":"PANCITOS GOURMET","items":[{"type":"day","label":"(Se produce lunes y jueves) (Pedir: D - Mi)"},{"type":"product","name":"Pan brioche molde","id":"pan_030"},{"type":"product","name":"Pan brioche mini (paq x6)","id":"pan_031"},{"type":"product","name":"Pan brioche relleno de uva pasa y nutella","id":"pan_032"},{"type":"product","name":"Pan brioche relleno JyQ","id":"pan_033"},{"type":"product","name":"Pancitos brioche x12","id":"pan_034"},{"type":"product","name":"Pan de hsa brioche molde","id":"pan_035"},{"type":"product","name":"Pancitos ajo y albahaca","id":"pan_036"},{"type":"product","name":"Pancitos de cebolla","id":"pan_037"},{"type":"product","name":"Pancitos doble queso","id":"pan_038"},{"type":"product","name":"Pancitos salvado s/s","id":"pan_039"},{"type":"product","name":"Pancitos salvado c/s","id":"pan_040"},{"type":"product","name":"Pancitos con uva pasa","id":"pan_041"},{"type":"product","name":"Pan trenza chip / kilo","id":"pan_042"},{"type":"product","name":"Pan tipo flor masa chip / kilo","id":"pan_043"},{"type":"day","label":"(Se produce martes y viernes) (Pedir: L - J)"},{"type":"product","name":"Pan molde salvado c/ semilla","id":"pan_044"},{"type":"product","name":"Pan molde salvado s/ semilla","id":"pan_045"},{"type":"product","name":"Pan molde doble salvado","id":"pan_046"},{"type":"product","name":"Galleta 7 semillas / paquetes","id":"pan_047"},{"type":"product","name":"Galleta con harina de lino","id":"pan_048"},{"type":"product","name":"Pan salvado doble fibra","id":"pan_049"},{"type":"product","name":"Pan alemán grande / unidad","id":"pan_050"},{"type":"product","name":"Pan trenza integral con semillas","id":"pan_051"},{"type":"product","name":"Pan de arándanos","id":"pan_052"},{"type":"product","name":"Pan de molde integral","id":"pan_053"},{"type":"product","name":"Pan de centeno","id":"pan_054"},{"type":"day","label":"(se produce miercoles y sábado) (Pedir: Ma - V)"},{"type":"product","name":"Pan rustico masa madre","id":"pan_055"},{"type":"product","name":"Pan kesu mini /paquete","id":"pan_056"},{"type":"product","name":"Pan kesu redondo / paquete","id":"pan_057"},{"type":"product","name":"Pan de pasas / paquetes","id":"pan_058"},{"type":"product","name":"Pan lactal molde","id":"pan_059"}]},{"title":"CHIPAS","items":[{"type":"product","name":"Chipitas por kilo","id":"pan_060"},{"type":"product","name":"Chipa argollita","id":"pan_061"},{"type":"product","name":"Chipa trenza","id":"pan_062"},{"type":"product","name":"Chipa tronquito","id":"pan_063"},{"type":"product","name":"Chipa mini paquita","id":"pan_064"}]},{"title":"PANES BLANDOS / PAQUETE","items":[{"type":"day","label":"(Se produce todos los dias)"},{"type":"product","name":"Mesa blanco","id":"pan_065"},{"type":"product","name":"Mesa blanco mini (Tamaño chips)","id":"pan_066"},{"type":"product","name":"Mesa integral","id":"pan_067"},{"type":"product","name":"Súper pancho","id":"pan_068"},{"type":"product","name":"Viena","id":"pan_069"},{"type":"product","name":"Pebete blanco","id":"pan_070"},{"type":"product","name":"Pebete blanco / produccion","id":"pan_071"},{"type":"product","name":"Pebete integral","id":"pan_072"},{"type":"product","name":"Hamburguesa c/semilla","id":"pan_073"},{"type":"product","name":"Hamburguesa s/semilla","id":"pan_074"},{"type":"product","name":"Hamburguesa infantil","id":"pan_075"},{"type":"product","name":"Hamburguesa parrillera c/semilla negra","id":"pan_076"},{"type":"product","name":"Pre-pizza x unidad","id":"pan_077"},{"type":"product","name":"Pre pizza pre cocida (para promo)","id":"pan_078"},{"type":"day","label":"(Se produce domingo, martes y jueves, se recibe lunes, miercoles y viernes despues del mediodia) (Pedir: D - Ma - J)"},{"type":"product","name":"Pan de sandwich blanco 2k / para prod","id":"pan_079"},{"type":"product","name":"Pan de sandwich integral 2k / para prod","id":"pan_080"},{"type":"product","name":"Pan de sandwich blanco ½ paq (1k)","id":"pan_081"},{"type":"product","name":"Pan de sandwich integral ½ paq (1k)","id":"pan_082"}]},{"title":"PRODUCTOS CONGELADOS","items":[{"type":"day","label":"(Se produce lunes y jueves) (Pedir: D - Mi)"},{"type":"product","name":"Pan de queso /paq 20 unid","id":"pan_083"},{"type":"product","name":"Chipa saludable / kilo","id":"pan_084"}]},{"title":"PRODUCTOS VARIOS","items":[{"type":"day","label":"(Se produce lunes y jueves) (Pedir: D - Mi)"},{"type":"product","name":"Boyitos / paq 200g","id":"pan_085"},{"type":"product","name":"Chipita piru / paq","id":"pan_086"},{"type":"product","name":"Pan pita / paq 2 unid","id":"pan_087"},{"type":"product","name":"Pizzetas / paq 2 unid","id":"pan_088"},{"type":"product","name":"Tostadas / paq 200g","id":"pan_089"},{"type":"product","name":"Tostada con ajo / paq 200g","id":"pan_090"},{"type":"product","name":"Pan chips / paq 15 unid","id":"pan_091"}]}],"Confitería":[{"title":"FACTURAS X UNIDAD","items":[{"type":"product","name":"Alfajores de maizena","id":"con_000"},{"type":"product","name":"Pastafrolas","id":"con_001"}]},{"title":"ESPECIALES","items":[{"type":"product","name":"Bizcochuelo naranja","id":"con_002"},{"type":"product","name":"Cañón","id":"con_003"},{"type":"product","name":"Pastafrolas por kilo","id":"con_004"}]},{"title":"ESPECIALES","items":[{"type":"product","name":"Bizcochuelo marmolado","id":"con_005"},{"type":"product","name":"Palmera","id":"con_006"},{"type":"product","name":"Tartita de manzana","id":"con_007"}]},{"title":"EMPAQUETADOS","items":[{"type":"product","name":"Brownie x unidad","id":"con_008"},{"type":"product","name":"Mini brownie (para bandeja)","id":"con_009"},{"type":"product","name":"Chocolachips blancos","id":"con_010"},{"type":"product","name":"Chocolachips negros","id":"con_011"},{"type":"product","name":"Croquant de chocolate","id":"con_012"},{"type":"product","name":"Galletitas de avena y miel","id":"con_013"},{"type":"product","name":"Galletitas de coco","id":"con_014"},{"type":"product","name":"Galletitas granola grande","id":"con_015"},{"type":"product","name":"Galletitas salvado grande","id":"con_016"},{"type":"product","name":"Mantecado de naranja","id":"con_017"},{"type":"product","name":"Merenguitos","id":"con_018"},{"type":"product","name":"Pepas de mermelada light","id":"con_019"},{"type":"product","name":"Galletitas de feculas (con chips y pasas de uva)","id":"con_020"},{"type":"product","name":"Bizcotti de la nonna","id":"con_021"},{"type":"product","name":"Petit para café","id":"con_022"},{"type":"product","name":"Se  produce: JUEVES","id":"con_023"},{"type":"day","label":"Se pide: Miercoles"}]},{"title":"MASITAS X KILO","items":[{"type":"product","name":"Alfajorcitos de maizena","id":"con_024"},{"type":"product","name":"Bolitas de coco","id":"con_025"},{"type":"product","name":"Brigadeiros","id":"con_026"},{"type":"product","name":"Corazoncito de d.d.l","id":"con_027"},{"type":"product","name":"Pastafrolitas","id":"con_028"},{"type":"product","name":"Estrella con almendras","id":"con_029"}]},{"title":"MASITAS X KILO","items":[{"type":"product","name":"Alfajorcito marplatense","id":"con_030"},{"type":"product","name":"Alfajorcitos bañados b y n","id":"con_031"},{"type":"product","name":"Bastoncito blanco","id":"con_032"},{"type":"product","name":"Bastoncitos de chocolate","id":"con_033"},{"type":"product","name":"Pañuelitos","id":"con_034"},{"type":"product","name":"Fantasmitas b y n","id":"con_035"}]},{"title":"MASITAS X KILO","items":[{"type":"product","name":"Anillo de frutilla","id":"con_036"},{"type":"product","name":"Palmeritas","id":"con_037"},{"type":"product","name":"Pionono ddg","id":"con_038"},{"type":"product","name":"Pionono ddl","id":"con_039"},{"type":"product","name":"Ruedita de durazno","id":"con_040"},{"type":"product","name":"Ruedita de frutilla","id":"con_041"}]},{"title":"TORTAS","items":[{"type":"product","name":"Bombon chico","id":"con_042"},{"type":"product","name":"Frutas chico","id":"con_043"},{"type":"product","name":"Infantil chico","id":"con_044"},{"type":"product","name":"Lady caramel chico","id":"con_045"},{"type":"product","name":"Tres leches","id":"con_046"},{"type":"product","name":"Vitapan","id":"con_047"},{"type":"product","name":"Torta promocional","id":"con_048"},{"type":"day","label":"SEGÚN TEMPORADA"}]},{"title":"TORTAS","items":[{"type":"product","name":"Camila","id":"con_049"},{"type":"product","name":"Mocca","id":"con_050"},{"type":"product","name":"Oreo","id":"con_051"},{"type":"product","name":"Selva negra chica","id":"con_052"},{"type":"product","name":"MINI TORTAS","id":"con_053"},{"type":"product","name":"Arcoiris","id":"con_054"},{"type":"product","name":"Prestigio","id":"con_055"},{"type":"product","name":"Golden","id":"con_056"},{"type":"day","label":"Se produce LUN - VIER"},{"type":"day","label":"Se pide Dom y Jue"}]},{"title":"TORTAS","items":[{"type":"product","name":"Diva de chocolate chica","id":"con_057"},{"type":"product","name":"Doble mousse","id":"con_058"},{"type":"product","name":"Gaia","id":"con_059"},{"type":"product","name":"MINI TORTAS","id":"con_060"},{"type":"product","name":"Imperial rusa","id":"con_061"},{"type":"product","name":"Infalible","id":"con_062"},{"type":"product","name":"Brownie","id":"con_063"},{"type":"day","label":"NO PERECEDEROS"},{"type":"day","label":"Se producen: LUN - JUE"},{"type":"day","label":"Se pide Dom - Mier"}]},{"title":"BUDINES","items":[{"type":"product","name":"Guayaba y coco","id":"con_064"},{"type":"product","name":"Marmolado","id":"con_065"},{"type":"product","name":"Ingles","id":"con_066"},{"type":"product","name":"Napolitano","id":"con_067"},{"type":"product","name":"Budin de avena","id":"con_068"}]},{"title":"PRODUCTOS DE FRUTILLA","items":[{"type":"product","name":"Pastafrola de frutilla","id":"con_069"},{"type":"product","name":"Pionono de frutilla","id":"con_070"},{"type":"product","name":"Postre de frutilla","id":"con_071"},{"type":"product","name":"Tarta de frutilla","id":"con_072"},{"type":"product","name":"Tarteletitas de frutilla","id":"con_073"},{"type":"product","name":"Torta de frutilla","id":"con_074"},{"type":"day","label":"Se produce: MIERCOLES"},{"type":"day","label":"Se pide: Martes"}]},{"title":"POSTRES POR UNIDAD","items":[{"type":"product","name":"Arroz con leche","id":"con_075"},{"type":"product","name":"Crema catalana","id":"con_076"},{"type":"product","name":"Gelatina normal","id":"con_077"},{"type":"product","name":"Mousse de chocolate","id":"con_078"},{"type":"product","name":"Mousse de frutilla","id":"con_079"},{"type":"product","name":"Mousse de mburucuja","id":"con_080"},{"type":"product","name":"Pave de chocolate","id":"con_081"},{"type":"product","name":"Postre de coco","id":"con_082"},{"type":"product","name":"Postre galletitas","id":"con_083"},{"type":"product","name":"Tiramisu","id":"con_084"},{"type":"product","name":"Tres leches","id":"con_085"},{"type":"product","name":"Tres leches de chocolate","id":"con_086"}]},{"title":"VARIOS","items":[{"type":"product","name":"Carrot cake","id":"con_087"},{"type":"product","name":"Carrot cake decorado","id":"con_088"},{"type":"product","name":"Galletitas mantecadas","id":"con_089"},{"type":"product","name":"Galletitas paleta \"Feliz día\"","id":"con_090"},{"type":"product","name":"Galletitas paletas","id":"con_091"},{"type":"product","name":"Muffin  de avena","id":"con_092"},{"type":"product","name":"Muffin de zanahoria","id":"con_093"},{"type":"product","name":"Petit para cafeteria","id":"con_094"}]},{"title":"VARIOS","items":[{"type":"product","name":"Alfajor especial blanco","id":"con_095"},{"type":"product","name":"Alfajor especial negro","id":"con_096"},{"type":"product","name":"Alfajorcitos en paquetes/cajitas","id":"con_097"},{"type":"product","name":"Bandejitas de merienda","id":"con_098"},{"type":"product","name":"Corazon de masitas","id":"con_099"},{"type":"product","name":"Cup cake cajita x 2","id":"con_100"},{"type":"product","name":"Cup cake cajita x 4","id":"con_101"},{"type":"product","name":"Cup cake mini","id":"con_102"},{"type":"product","name":"Habanos de chocolate blanco","id":"con_103"},{"type":"product","name":"Habanos de chocolate negro","id":"con_104"},{"type":"product","name":"Pan dulce en plancha","id":"con_105"},{"type":"day","label":"Todos los pedidos especiales con 48 horas de anticipacíon"}]},{"title":"POSTRES","items":[{"type":"product","name":"Budin de pan mini","id":"con_106"},{"type":"product","name":"Chesse cake de chocolate","id":"con_107"},{"type":"product","name":"Chesse cake de frutos rojos","id":"con_108"},{"type":"product","name":"Chesse cake de mburucuya","id":"con_109"},{"type":"product","name":"Chesse cake oreo","id":"con_110"},{"type":"product","name":"Flan vitapan pequeño","id":"con_111"},{"type":"product","name":"Tarta mousse de chocolate","id":"con_112"}]},{"title":"ALFAJORES","items":[{"type":"product","name":"Triple","id":"con_113"},{"type":"product","name":"Bañado blanco","id":"con_114"},{"type":"product","name":"Bañado negro","id":"con_115"},{"type":"product","name":"Marplatense","id":"con_116"}]},{"title":"TARTELETITAS","items":[{"type":"product","name":"Pie flan de limon","id":"con_117"},{"type":"product","name":"Tarteletitas de frutas","id":"con_118"}]},{"title":"TARTAS","items":[{"type":"product","name":"Pie de limon","id":"con_119"},{"type":"product","name":"Tarta de frutas","id":"con_120"}]}],"Saludables":[{"title":"POSTRES","items":[{"type":"product","name":"4 leches","id":"sal_000"},{"type":"product","name":"Chocolate","id":"sal_001"},{"type":"product","name":"Coco","id":"sal_002"},{"type":"product","name":"Frutilla","id":"sal_003"}]},{"title":"TORTAS","items":[{"type":"product","name":"Café","id":"sal_004"},{"type":"product","name":"Chocolate","id":"sal_005"},{"type":"product","name":"Coco","id":"sal_006"},{"type":"product","name":"Frutilla","id":"sal_007"}]},{"title":"VARIOS","items":[{"type":"product","name":"Alfajores de avena en cajita","id":"sal_008"},{"type":"product","name":"Pastafrola de avena","id":"sal_009"}]},{"title":"BIZCOCHUELOS / BUDINES","items":[{"type":"product","name":"Avena y banana","id":"sal_010"},{"type":"product","name":"Avena y nuez","id":"sal_011"}]},{"title":"BIZCOCHUELOS / BUDINES","items":[{"type":"product","name":"Carrot cake","id":"sal_012"},{"type":"product","name":"Mini carrot","id":"sal_013"}]},{"title":"BIZCOCHUELOS / BUDINES","items":[{"type":"product","name":"Red Velvet","id":"sal_014"},{"type":"product","name":"Mini red velvet","id":"sal_015"}]},{"title":"GALLETITAS & OTROS","items":[{"type":"product","name":"Brownie de avena","id":"sal_016"},{"type":"product","name":"Choco cookies","id":"sal_017"},{"type":"product","name":"Cookies de avena y chips","id":"sal_018"},{"type":"product","name":"Cookie bomb chip","id":"sal_019"},{"type":"product","name":"Cookie bomb red velvet","id":"sal_020"},{"type":"product","name":"Cookie bomb chocolate","id":"sal_021"}]},{"title":"GALLETITAS & OTROS","items":[{"type":"product","name":"Avena (Bastoncitos c/ choco)","id":"sal_022"},{"type":"product","name":"Muffin de chocolate","id":"sal_023"},{"type":"product","name":"Naranja","id":"sal_024"}]},{"title":"PRODUCTOS VARIOS","items":[{"type":"product","name":"Alfajores FIT (harina de arroz)","id":"sal_025"},{"type":"product","name":"Tartita de durazno","id":"sal_026"},{"type":"product","name":"Tartita de frutilla","id":"sal_027"}]},{"title":"ROTISERIA","items":[{"type":"product","name":"Coxinha de atun","id":"sal_028"},{"type":"product","name":"Coxinha de pollo","id":"sal_029"}]},{"title":"ROTISERIA","items":[{"type":"product","name":"Empanada atun","id":"sal_030"},{"type":"product","name":"Empanada criolla","id":"sal_031"},{"type":"product","name":"Empanada de choclo","id":"sal_032"},{"type":"product","name":"Empanada de pollo","id":"sal_033"}]},{"title":"ROTISERIA","items":[{"type":"product","name":"Pizzeta margarina","id":"sal_034"},{"type":"product","name":"Pizzeta muzarella","id":"sal_035"},{"type":"product","name":"Tartita de atun","id":"sal_036"},{"type":"product","name":"Tartita de choclo","id":"sal_037"},{"type":"product","name":"Tartita de pollo","id":"sal_038"}]}]};
+const CATEGORIES = Object.keys(CATALOG);
+
+// Mapa id -> {name, cat}, para mostrar nombres en el resumen y el PDF sin recorrer todo el catálogo.
+const PRODUCT_BY_ID = {};
+CATEGORIES.forEach(cat=>{
+  CATALOG[cat].forEach(section=>{
+    section.items.forEach(item=>{
+      if(item.type === 'product') PRODUCT_BY_ID[item.id] = { name: item.name, cat };
+    });
+  });
+});
+
+let currentUser = null;
+let currentCat = CATEGORIES[0];
+let currentDate = new Date().toISOString().slice(0,10);
+let data = {};       // { fecha: { categoria: { id: {s,p} } } }
+let lastStock = {};  // { id: {s, cat, name} }  -- último stock conocido, cruza fechas
+let inputRefs = {};  // { id: {sInput, pInput, row} } -- solo de la pestaña/fecha visibles ahora
+let unsubItems = null;
+const debounceTimers = {};
+
+function ensureDateBucket(fecha){
+  if(!data[fecha]) data[fecha] = {};
+  CATEGORIES.forEach(cat=>{ if(!data[fecha][cat]) data[fecha][cat] = {}; });
+  return data[fecha];
+}
+
+// ---------- Autenticación ----------
+auth.onAuthStateChanged(user=>{
+  if(user){
+    currentUser = user;
+    document.getElementById('loginOverlay').classList.add('hidden');
+    document.getElementById('userBadge').textContent = user.email;
+    iniciarApp();
+  } else {
+    currentUser = null;
+    document.getElementById('loginOverlay').classList.remove('hidden');
+  }
+});
+
+document.getElementById('loginForm').addEventListener('submit', (e)=>{
+  e.preventDefault();
+  const email = document.getElementById('loginEmail').value.trim();
+  const pass = document.getElementById('loginPass').value;
+  const errEl = document.getElementById('loginError');
+  errEl.textContent = '';
+  auth.signInWithEmailAndPassword(email, pass).catch(err=>{
+    errEl.textContent = 'No se pudo iniciar sesión: ' + (err.message || err.code);
+  });
+});
+
+document.getElementById('btnLogout').addEventListener('click', ()=> auth.signOut());
+
+// ---------- Carga inicial + suscripciones en tiempo real ----------
+async function cargarStockActualInicial(){
+  try{
+    const snap = await db.collection('stock_actual').get();
+    snap.forEach(doc=>{
+      const d = doc.data();
+      lastStock[doc.id] = { s: d.s !== undefined ? d.s : '', cat: d.cat, name: d.name };
+    });
+  }catch(e){ console.warn('No se pudo leer stock_actual', e); }
+}
+
+function suscribirseAStockActual(){
+  db.collection('stock_actual').onSnapshot(snap=>{
+    snap.docChanges().forEach(change=>{
+      const d = change.doc.data();
+      lastStock[change.doc.id] = { s: d.s !== undefined ? d.s : '', cat: d.cat, name: d.name };
+    });
+  });
+}
+
+async function cargarFechaInicial(fecha){
+  ensureDateBucket(fecha);
+  try{
+    const snap = await db.collection('pedidos').doc(fecha).collection('items').get();
+    snap.forEach(doc=>{
+      const d = doc.data();
+      if(!data[fecha][d.cat]) data[fecha][d.cat] = {};
+      data[fecha][d.cat][doc.id] = { s: d.s !== undefined ? d.s : '', p: d.p !== undefined ? d.p : '' };
+    });
+  }catch(e){ console.warn('No se pudo leer pedidos de la fecha', e); }
+}
+
+function suscribirseAFecha(fecha){
+  if(unsubItems) unsubItems();
+  unsubItems = db.collection('pedidos').doc(fecha).collection('items').onSnapshot(snap=>{
+    ensureDateBucket(fecha);
+    snap.docChanges().forEach(change=>{
+      const d = change.doc.data();
+      const id = change.doc.id;
+      const cat = d.cat;
+      if(!data[fecha][cat]) data[fecha][cat] = {};
+      data[fecha][cat][id] = { s: d.s !== undefined ? d.s : '', p: d.p !== undefined ? d.p : '' };
+      actualizarCeldaEnPantalla(fecha, cat, id);
+    });
+    updateFooterCount();
+    document.getElementById('footerSave').textContent = '✓ sincronizado ' + new Date().toLocaleTimeString('es-PY',{hour:'2-digit',minute:'2-digit'});
+  }, err=>{
+    document.getElementById('footerSave').textContent = '⚠ sin conexión (se guarda al volver)';
+  });
+}
+
+async function iniciarApp(){
+  document.getElementById('statusPill').textContent = 'cargando…';
+  await cargarStockActualInicial();
+  suscribirseAStockActual();
+  renderTabs();
+  document.getElementById('fecha').value = currentDate;
+  await cargarFechaInicial(currentDate);
+  suscribirseAFecha(currentDate);
+  renderContent();
+  document.getElementById('statusPill').textContent = 'sincronizado';
+}
+
+// ---------- Guardado (con espera corta para no escribir en cada tecla) ----------
+function guardarCampo(cat, id, name, campo, valor){
+  ensureDateBucket(currentDate);
+  if(!data[currentDate][cat]) data[currentDate][cat] = {};
+  if(!data[currentDate][cat][id]) data[currentDate][cat][id] = { s:'', p:'' };
+  data[currentDate][cat][id][campo] = valor;
+
+  const key = currentDate + '_' + id + '_' + campo;
+  clearTimeout(debounceTimers[key]);
+  document.getElementById('footerSave').textContent = '… guardando';
+  debounceTimers[key] = setTimeout(()=>{
+    const ref = db.collection('pedidos').doc(currentDate).collection('items').doc(id);
+    ref.set({
+      cat, name, [campo]: valor,
+      actualizadoPor: currentUser ? currentUser.email : '',
+      actualizadoEn: firebase.firestore.FieldValue.serverTimestamp()
+    }, { merge:true }).catch(()=>{
+      document.getElementById('footerSave').textContent = '⚠ se guardará al volver la conexión';
+    });
+
+    if(campo === 's'){
+      db.collection('stock_actual').doc(id).set({
+        cat, name, s: valor,
+        actualizadoPor: currentUser ? currentUser.email : '',
+        actualizadoEn: firebase.firestore.FieldValue.serverTimestamp()
+      }, { merge:true }).catch(()=>{});
+    }
+  }, 450);
+}
+
+// ---------- Render ----------
+function renderTabs(){
+  const tabsEl = document.getElementById('tabs');
+  tabsEl.innerHTML = '';
+  CATEGORIES.forEach(cat=>{
+    const b = document.createElement('button');
+    b.textContent = cat;
+    b.className = cat === currentCat ? 'active' : '';
+    b.onclick = ()=>{ currentCat = cat; document.getElementById('buscador').value=''; renderTabs(); renderContent(); };
+    tabsEl.appendChild(b);
+  });
+}
+
+function updateFooterCount(){
+  const bucket = ensureDateBucket(currentDate);
+  let count = 0;
+  CATEGORIES.forEach(cat=>{
+    Object.values(bucket[cat]).forEach(e=>{ if(e.p !== '' && Number(e.p) > 0) count++; });
+  });
+  document.getElementById('footerCount').textContent = count + (count===1 ? ' producto con pedido' : ' productos con pedido');
+}
+
+function actualizarCeldaEnPantalla(fecha, cat, id){
+  if(fecha !== currentDate || cat !== currentCat) return;
+  const refs = inputRefs[id];
+  if(!refs) return;
+  const entry = (data[fecha][cat] && data[fecha][cat][id]) || { s:'', p:'' };
+  if(document.activeElement !== refs.sInput) refs.sInput.value = entry.s;
+  if(document.activeElement !== refs.pInput) refs.pInput.value = entry.p;
+  refs.row.classList.toggle('has-pedido', Number(entry.p) > 0);
+}
+
+function renderContent(){
+  const cont = document.getElementById('contenido');
+  cont.innerHTML = '';
+  inputRefs = {};
+  const filtro = document.getElementById('buscador').value.trim().toLowerCase();
+  const sections = CATALOG[currentCat];
+  const bucket = ensureDateBucket(currentDate);
+  let anyVisible = false;
+
+  sections.forEach(section=>{
+    const secEl = document.createElement('div');
+    secEl.className = 'section';
+    let secHasVisible = false;
+
+    const titleEl = document.createElement('div');
+    titleEl.className = 'section-title';
+    titleEl.textContent = section.title;
+    secEl.appendChild(titleEl);
+
+    section.items.forEach(item=>{
+      if(item.type === 'day'){
+        const d = document.createElement('div');
+        d.className = 'day-label';
+        d.textContent = item.label;
+        secEl.appendChild(d);
+        return;
+      }
+      const { id, name } = item;
+      if(filtro && !name.toLowerCase().includes(filtro)) return;
+      secHasVisible = true; anyVisible = true;
+
+      const existente = bucket[currentCat][id];
+      const entry = existente || { s: (lastStock[id] ? lastStock[id].s : ''), p: '' };
+
+      const row = document.createElement('div');
+      row.className = 'prod-row' + (Number(entry.p) > 0 ? ' has-pedido' : '');
+
+      const nameEl = document.createElement('div');
+      nameEl.className = 'prod-name';
+      nameEl.textContent = name;
+      row.appendChild(nameEl);
+
+      const sWrap = document.createElement('div');
+      sWrap.className = 'field-wrap';
+      sWrap.innerHTML = '<span>Stock</span>';
+      const sInput = document.createElement('input');
+      sInput.type = 'number'; sInput.min = '0'; sInput.inputMode='decimal';
+      sInput.value = entry.s;
+      sInput.addEventListener('input', ()=>{
+        guardarCampo(currentCat, id, name, 's', sInput.value);
+      });
+      sWrap.appendChild(sInput);
+      row.appendChild(sWrap);
+
+      const pWrap = document.createElement('div');
+      pWrap.className = 'field-wrap';
+      pWrap.innerHTML = '<span>Pedido</span>';
+      const pInput = document.createElement('input');
+      pInput.type = 'number'; pInput.min = '0'; pInput.inputMode='decimal';
+      pInput.value = entry.p;
+      pInput.addEventListener('input', ()=>{
+        row.classList.toggle('has-pedido', Number(pInput.value) > 0);
+        guardarCampo(currentCat, id, name, 'p', pInput.value);
+        updateFooterCount();
+      });
+      pWrap.appendChild(pInput);
+      row.appendChild(pWrap);
+
+      inputRefs[id] = { sInput, pInput, row };
+      secEl.appendChild(row);
+    });
+
+    if(secHasVisible) cont.appendChild(secEl);
+  });
+
+  if(!anyVisible){
+    const msg = document.createElement('div');
+    msg.className = 'empty-msg';
+    msg.textContent = filtro ? 'No se encontraron productos con "' + filtro + '"' : 'No hay productos en esta categoría.';
+    cont.appendChild(msg);
+  }
+  updateFooterCount();
+}
+
+function renderResumen(){
+  const bucket = ensureDateBucket(currentDate);
+  const root = document.getElementById('modalRoot');
+  let html = '<div class="modal-overlay" id="ovResumen"><div class="modal">';
+  html += '<h2>Resumen del pedido</h2>';
+  html += '<div class="modal-sub">Fecha: ' + currentDate + ' · productos con pedido cargado</div>';
+
+  let totalItems = 0;
+  CATEGORIES.forEach(cat=>{
+    const entries = Object.entries(bucket[cat]).filter(([id,e])=> e.p !== '' && Number(e.p) > 0);
+    if(entries.length === 0) return;
+    html += '<div class="cat-h">' + cat + '</div><ul>';
+    entries.forEach(([id, e])=>{
+      totalItems++;
+      const nombre = (PRODUCT_BY_ID[id] && PRODUCT_BY_ID[id].name) || id;
+      html += '<li><span>' + nombre + '</span><b>' + e.p + '</b></li>';
+    });
+    html += '</ul>';
+  });
+
+  if(totalItems === 0){
+    html += '<p style="font-size:.85rem;color:#a4917a;">Todavía no cargaste ningún pedido para esta fecha.</p>';
+  }
+
+  html += '<button class="modal-close" id="closeResumen">Cerrar</button>';
+  html += '</div></div>';
+  root.innerHTML = html;
+  document.getElementById('closeResumen').onclick = ()=>{ root.innerHTML = ''; };
+  document.getElementById('ovResumen').addEventListener('click', (e)=>{ if(e.target.id === 'ovResumen') root.innerHTML=''; });
+}
+
+// ---------- PDF ----------
+function construirCuerpoCategoria(cat, bucket){
+  const body = [];
+  const boundaries = [];
+  CATALOG[cat].forEach(section=>{
+    boundaries.push(body.length);
+    body.push([{ content: section.title, colSpan: 3, styles:{ fillColor:[227,227,227], textColor:[20,20,20], fontStyle:'bold' } }]);
+    section.items.forEach(item=>{
+      if(item.type === 'day'){
+        body.push([{ content: item.label, colSpan: 3, styles:{ fontStyle:'italic', fillColor: false, textColor:[95,95,95] } }]);
+      } else {
+        const e = (bucket[cat] && bucket[cat][item.id]) || {s:'', p:''};
+        body.push([item.name, e.s !== '' ? String(e.s) : '', e.p !== '' ? String(e.p) : '']);
+      }
+    });
+  });
+  return { body, boundaries };
+}
+
+function medirAlturaCuerpo(doc, body, fontSize, cellPadding, colWidth){
+  doc.setFontSize(fontSize);
+  const anchoFijo = 20;
+  const anchoNombre = Math.max(15, colWidth - anchoFijo*2 - cellPadding*6 - 6);
+  const anchoColSpan = Math.max(15, colWidth - cellPadding*2 - 4);
+  const lineH = fontSize*1.15 + cellPadding*2;
+  let total = 0;
+  body.forEach(row=>{
+    if(row.length === 1){
+      const lineas = doc.splitTextToSize(String(row[0].content), anchoColSpan).length;
+      total += lineH * lineas;
+    } else {
+      const lineas = doc.splitTextToSize(String(row[0]), anchoNombre).length;
+      total += lineH * lineas;
+    }
+  });
+  return total * 1.05;
+}
+
+function elegirCorte(doc, body, boundaries, colWidth){
+  const refFont = 6.5, refPad = 1.3;
+  const candidatos = boundaries.filter(b=>b>0 && b<body.length);
+  if(candidatos.length === 0) return Math.round(body.length/2);
+  let mejorCorte = candidatos[0];
+  let mejorDiff = Infinity;
+  candidatos.forEach(b=>{
+    const altoIzq = medirAlturaCuerpo(doc, body.slice(0,b), refFont, refPad, colWidth);
+    const altoDer = medirAlturaCuerpo(doc, body.slice(b), refFont, refPad, colWidth);
+    const diff = Math.abs(altoIzq - altoDer);
+    if(diff < mejorDiff){ mejorDiff = diff; mejorCorte = b; }
+  });
+  return mejorCorte;
+}
+
+function ajustarFuente(doc, bodyIzq, bodyDer, colWidth, alturaDisponible){
+  let fontSize = 8;
+  let cellPadding = 2;
+  while(fontSize > 3){
+    cellPadding = Math.max(0.3, Math.min(2, fontSize*0.22));
+    const headFontSize = Math.min(fontSize+0.5, 8.5);
+    const altoHeader = headFontSize*1.15 + cellPadding*2;
+    const altoIzq = medirAlturaCuerpo(doc, bodyIzq, fontSize, cellPadding, colWidth) + altoHeader;
+    const altoDer = medirAlturaCuerpo(doc, bodyDer, fontSize, cellPadding, colWidth) + altoHeader;
+    if(Math.max(altoIzq, altoDer) <= alturaDisponible) break;
+    fontSize -= 0.1;
+  }
+  return { fontSize: Math.max(fontSize, 3), cellPadding };
+}
+
+function renderizarDosColumnas(doc, bodyIzq, bodyDer, topY){
+  const pageW = doc.internal.pageSize.getWidth();
+  const pageH = doc.internal.pageSize.getHeight();
+  const margin = 22, gutter = 10;
+  const colWidth = (pageW - margin*2 - gutter) / 2;
+  const alturaDisponible = pageH - topY - margin;
+
+  const { fontSize, cellPadding } = ajustarFuente(doc, bodyIzq, bodyDer, colWidth, alturaDisponible);
+
+  const estiloBase = {
+    styles:{ fontSize:fontSize, cellPadding:cellPadding, textColor:[20,20,20], lineColor:[180,180,180], lineWidth:0.4, overflow:'linebreak' },
+    headStyles:{ fillColor:[70,70,70], textColor:255, fontSize:Math.min(fontSize+0.5, 8.5) },
+    columnStyles:{ 0:{ cellWidth:'wrap' }, 1:{ cellWidth:20, halign:'center' }, 2:{ cellWidth:20, halign:'center' } },
+    pageBreak:'avoid'
+  };
+
+  doc.autoTable(Object.assign({
+    head: [['Producto','Stock','Pedido']],
+    body: bodyIzq,
+    startY: topY,
+    margin:{ left: margin, right: pageW - margin - colWidth },
+    tableWidth: 'wrap'
+  }, estiloBase));
+
+  doc.autoTable(Object.assign({
+    head: [['Producto','Stock','Pedido']],
+    body: bodyDer,
+    startY: topY,
+    margin:{ left: margin + colWidth + gutter, right: margin },
+    tableWidth: 'wrap'
+  }, estiloBase));
+}
+
+function dibujarEncabezadoPDF(doc, titulo){
+  doc.setTextColor(0,0,0);
+  doc.setFontSize(11);
+  doc.text(titulo, 22, 18);
+  doc.setFontSize(8);
+  doc.setTextColor(70,70,70);
+  doc.text('Fecha: ' + currentDate, 22, 30);
+  doc.text('VitaPan', doc.internal.pageSize.getWidth() - 22, 30, { align:'right' });
+}
+
+function generarPDF(){
+  if(!window.jspdf){
+    alert('No se pudo cargar el generador de PDF. Verificá tu conexión a internet e intentá de nuevo.');
+    return;
+  }
+  const { jsPDF } = window.jspdf;
+  const doc = new jsPDF({ unit:'pt', format:'a4' });
+  const bucket = ensureDateBucket(currentDate);
+
+  dibujarEncabezadoPDF(doc, 'PLANILLA DE PEDIDO - ' + currentCat.toUpperCase());
+
+  const pageW = doc.internal.pageSize.getWidth();
+  const margin = 22, gutter = 10;
+  const colWidth = (pageW - margin*2 - gutter) / 2;
+  const { body, boundaries } = construirCuerpoCategoria(currentCat, bucket);
+  const corte = elegirCorte(doc, body, boundaries, colWidth);
+
+  renderizarDosColumnas(doc, body.slice(0, corte), body.slice(corte), 46);
+
+  doc.save('Pedido_' + currentCat.replace(/\s+/g,'_') + '_' + currentDate + '.pdf');
+}
+
+function generarPDFCombinado(catA, catB){
+  if(!window.jspdf){
+    alert('No se pudo cargar el generador de PDF. Verificá tu conexión a internet e intentá de nuevo.');
+    return;
+  }
+  const { jsPDF } = window.jspdf;
+  const doc = new jsPDF({ unit:'pt', format:'a4' });
+  const bucket = ensureDateBucket(currentDate);
+
+  dibujarEncabezadoPDF(doc, 'PLANILLA DE PEDIDO - ' + catA.toUpperCase() + ' / ' + catB.toUpperCase());
+
+  const rA = construirCuerpoCategoria(catA, bucket);
+  const rB = construirCuerpoCategoria(catB, bucket);
+  const offset = rA.body.length;
+  const bodyCombinado = rA.body.concat(rB.body);
+  const boundariesCombinado = rA.boundaries.concat(rB.boundaries.map(b => b + offset));
+
+  const pageW = doc.internal.pageSize.getWidth();
+  const margin = 22, gutter = 10;
+  const colWidth = (pageW - margin*2 - gutter) / 2;
+  const corte = elegirCorte(doc, bodyCombinado, boundariesCombinado, colWidth);
+
+  renderizarDosColumnas(doc, bodyCombinado.slice(0, corte), bodyCombinado.slice(corte), 46);
+
+  doc.save('Pedido_' + catA.replace(/\s+/g,'_') + '_' + catB.replace(/\s+/g,'_') + '_' + currentDate + '.pdf');
+}
+
+function abrirSelectorCombinado(){
+  const root = document.getElementById('modalRoot');
+  let html = '<div class="modal-overlay" id="ovCombinado"><div class="modal">';
+  html += '<h2>Combinar 2 pestañas en una hoja</h2>';
+  html += '<div class="modal-sub">Marcá exactamente 2 categorías</div>';
+  html += '<ul style="list-style:none;padding:0;margin:0;">';
+  CATEGORIES.forEach((cat,i)=>{
+    html += '<li style="padding:8px 0;border-bottom:1px solid var(--linea);display:flex;align-items:center;gap:8px;">'
+      + '<input type="checkbox" class="chkCombo" value="' + cat + '" id="chkCombo' + i + '">'
+      + '<label for="chkCombo' + i + '" style="font-size:.85rem;">' + cat + '</label></li>';
+  });
+  html += '</ul>';
+  html += '<button class="modal-close" id="generarCombinadoBtn">Generar PDF</button>';
+  html += '</div></div>';
+  root.innerHTML = html;
+  document.getElementById('ovCombinado').addEventListener('click', (e)=>{ if(e.target.id === 'ovCombinado') root.innerHTML = ''; });
+  document.getElementById('generarCombinadoBtn').onclick = ()=>{
+    const seleccion = Array.from(document.querySelectorAll('.chkCombo:checked')).map(el=>el.value);
+    if(seleccion.length !== 2){
+      alert('Elegí exactamente 2 categorías para combinar.');
+      return;
+    }
+    root.innerHTML = '';
+    generarPDFCombinado(seleccion[0], seleccion[1]);
+  };
+}
+
+// ---------- Eventos ----------
+document.getElementById('fecha').addEventListener('change', async (e)=>{
+  currentDate = e.target.value || new Date().toISOString().slice(0,10);
+  ensureDateBucket(currentDate);
+  renderContent();
+  await cargarFechaInicial(currentDate);
+  suscribirseAFecha(currentDate);
+  renderContent();
+});
+document.getElementById('buscador').addEventListener('input', renderContent);
+document.getElementById('btnResumen').addEventListener('click', renderResumen);
+document.getElementById('btnPDF').addEventListener('click', generarPDF);
+document.getElementById('btnCombinado').addEventListener('click', abrirSelectorCombinado);
+
+// ---------- Instalación como app + service worker ----------
+if('serviceWorker' in navigator){
+  window.addEventListener('load', ()=>{
+    navigator.serviceWorker.register('service-worker.js').catch(()=>{});
+  });
+}
+</script>
+</body>
+</html>
