@@ -268,6 +268,7 @@
     <button class="summary-btn" id="btnResumen">Ver resumen</button>
     <button class="summary-btn" id="btnPDF">PDF</button>
     <button class="summary-btn" id="btnCombinado">Combinar 2</button>
+    <button class="summary-btn" id="btnCombinado3">Combinar 3</button>
   </div>
   <div id="contenido"></div>
 </main>
@@ -615,7 +616,7 @@ function construirCuerpoCategoria(cat, bucket){
 
 function medirAlturaCuerpo(doc, body, fontSize, cellPadding, colWidth){
   doc.setFontSize(fontSize);
-  const anchoFijo = 20;
+  const anchoFijo = 12; // S y P ahora se ajustan al contenido (números cortos), ocupan poco
   const anchoNombre = Math.max(15, colWidth - anchoFijo*2 - cellPadding*6 - 6);
   const anchoColSpan = Math.max(15, colWidth - cellPadding*2 - 4);
   const lineH = fontSize*1.15 + cellPadding*2;
@@ -632,67 +633,87 @@ function medirAlturaCuerpo(doc, body, fontSize, cellPadding, colWidth){
   return total * 1.05;
 }
 
-function elegirCorte(doc, body, boundaries, colWidth){
-  const refFont = 6.5, refPad = 1.3;
+// Elige los n-1 puntos de corte (siempre al inicio de una sección) que mejor reparten el alto
+// estimado entre las n columnas de la hoja.
+function elegirCortesMultiples(doc, body, boundaries, colWidth, n){
+  if(n <= 1) return [];
   const candidatos = boundaries.filter(b=>b>0 && b<body.length);
-  if(candidatos.length === 0) return Math.round(body.length/2);
-  let mejorCorte = candidatos[0];
-  let mejorDiff = Infinity;
-  candidatos.forEach(b=>{
-    const altoIzq = medirAlturaCuerpo(doc, body.slice(0,b), refFont, refPad, colWidth);
-    const altoDer = medirAlturaCuerpo(doc, body.slice(b), refFont, refPad, colWidth);
-    const diff = Math.abs(altoIzq - altoDer);
-    if(diff < mejorDiff){ mejorDiff = diff; mejorCorte = b; }
-  });
-  return mejorCorte;
+  if(candidatos.length === 0){
+    const cortes = [];
+    for(let k=1;k<n;k++) cortes.push(Math.round(body.length*k/n));
+    return cortes;
+  }
+  const refFont = 6.5, refPad = 1.3;
+  const total = medirAlturaCuerpo(doc, body, refFont, refPad, colWidth);
+  const alturasAcum = candidatos.map(b => ({ b, h: medirAlturaCuerpo(doc, body.slice(0,b), refFont, refPad, colWidth) }));
+  const cortes = [];
+  for(let k=1;k<n;k++){
+    const objetivo = total * k / n;
+    const prev = cortes.length ? cortes[cortes.length-1] : 0;
+    let mejor = null, mejorDiff = Infinity;
+    alturasAcum.forEach(({b,h})=>{
+      if(b <= prev) return;
+      const diff = Math.abs(h - objetivo);
+      if(diff < mejorDiff){ mejorDiff = diff; mejor = b; }
+    });
+    if(mejor === null) mejor = Math.max(prev+1, Math.round(body.length*k/n));
+    cortes.push(mejor);
+  }
+  return cortes;
 }
 
-function ajustarFuente(doc, bodyIzq, bodyDer, colWidth, alturaDisponible){
+function partirEnColumnas(body, cortes){
+  const partes = [];
+  let desde = 0;
+  cortes.forEach(c=>{ partes.push(body.slice(desde, c)); desde = c; });
+  partes.push(body.slice(desde));
+  return partes;
+}
+
+function ajustarFuenteN(doc, bodies, colWidth, alturaDisponible){
   let fontSize = 8;
   let cellPadding = 2;
   while(fontSize > 3){
     cellPadding = Math.max(0.3, Math.min(2, fontSize*0.22));
     const headFontSize = Math.min(fontSize+0.5, 8.5);
     const altoHeader = headFontSize*1.15 + cellPadding*2;
-    const altoIzq = medirAlturaCuerpo(doc, bodyIzq, fontSize, cellPadding, colWidth) + altoHeader;
-    const altoDer = medirAlturaCuerpo(doc, bodyDer, fontSize, cellPadding, colWidth) + altoHeader;
-    if(Math.max(altoIzq, altoDer) <= alturaDisponible) break;
+    const alturas = bodies.map(b => medirAlturaCuerpo(doc, b, fontSize, cellPadding, colWidth) + altoHeader);
+    if(Math.max(...alturas) <= alturaDisponible) break;
     fontSize -= 0.1;
   }
   return { fontSize: Math.max(fontSize, 3), cellPadding };
 }
 
-function renderizarDosColumnas(doc, bodyIzq, bodyDer, topY){
+function renderizarColumnas(doc, bodies, topY){
   const pageW = doc.internal.pageSize.getWidth();
   const pageH = doc.internal.pageSize.getHeight();
   const margin = 22, gutter = 10;
-  const colWidth = (pageW - margin*2 - gutter) / 2;
+  const n = bodies.length;
+  const colWidth = (pageW - margin*2 - gutter*(n-1)) / n;
   const alturaDisponible = pageH - topY - margin;
 
-  const { fontSize, cellPadding } = ajustarFuente(doc, bodyIzq, bodyDer, colWidth, alturaDisponible);
+  const { fontSize, cellPadding } = ajustarFuenteN(doc, bodies, colWidth, alturaDisponible);
 
   const estiloBase = {
     styles:{ fontSize:fontSize, cellPadding:cellPadding, textColor:[20,20,20], lineColor:[180,180,180], lineWidth:0.4, overflow:'linebreak' },
     headStyles:{ fillColor:[70,70,70], textColor:255, fontSize:Math.min(fontSize+0.5, 8.5) },
-    columnStyles:{ 0:{ cellWidth:'wrap' }, 1:{ cellWidth:20, halign:'center' }, 2:{ cellWidth:20, halign:'center' } },
+    // Las 3 columnas se ajustan a lo que realmente necesitan (nombre, y los números cortos de S/P)
+    // en vez de reservar siempre el mismo ancho fijo. Encabezados S/P como en la planilla original.
+    columnStyles:{ 0:{ cellWidth:'wrap' }, 1:{ cellWidth:'wrap', halign:'center' }, 2:{ cellWidth:'wrap', halign:'center' } },
     pageBreak:'avoid'
   };
 
-  doc.autoTable(Object.assign({
-    head: [['Producto','Stock','Pedido']],
-    body: bodyIzq,
-    startY: topY,
-    margin:{ left: margin, right: pageW - margin - colWidth },
-    tableWidth: 'wrap'
-  }, estiloBase));
-
-  doc.autoTable(Object.assign({
-    head: [['Producto','Stock','Pedido']],
-    body: bodyDer,
-    startY: topY,
-    margin:{ left: margin + colWidth + gutter, right: margin },
-    tableWidth: 'wrap'
-  }, estiloBase));
+  bodies.forEach((b, i)=>{
+    const left = margin + i*(colWidth + gutter);
+    const right = pageW - left - colWidth;
+    doc.autoTable(Object.assign({
+      head: [['Producto','S','P']],
+      body: b,
+      startY: topY,
+      margin:{ left: left, right: right },
+      tableWidth: 'wrap'
+    }, estiloBase));
+  });
 }
 
 function dibujarEncabezadoPDF(doc, titulo){
@@ -716,18 +737,19 @@ function generarPDF(){
 
   dibujarEncabezadoPDF(doc, 'PLANILLA DE PEDIDO - ' + currentCat.toUpperCase());
 
+  const n = 2; // una sola categoría siempre se reparte en 2 columnas
   const pageW = doc.internal.pageSize.getWidth();
   const margin = 22, gutter = 10;
-  const colWidth = (pageW - margin*2 - gutter) / 2;
+  const colWidth = (pageW - margin*2 - gutter*(n-1)) / n;
   const { body, boundaries } = construirCuerpoCategoria(currentCat, bucket);
-  const corte = elegirCorte(doc, body, boundaries, colWidth);
+  const cortes = elegirCortesMultiples(doc, body, boundaries, colWidth, n);
 
-  renderizarDosColumnas(doc, body.slice(0, corte), body.slice(corte), 46);
+  renderizarColumnas(doc, partirEnColumnas(body, cortes), 46);
 
   doc.save('Pedido_' + currentCat.replace(/\s+/g,'_') + '_' + currentDate + '.pdf');
 }
 
-function generarPDFCombinado(catA, catB){
+function generarPDFCombinado(cats){
   if(!window.jspdf){
     alert('No se pudo cargar el generador de PDF. Verificá tu conexión a internet e intentá de nuevo.');
     return;
@@ -736,29 +758,36 @@ function generarPDFCombinado(catA, catB){
   const doc = new jsPDF({ unit:'pt', format:'a4' });
   const bucket = ensureDateBucket(currentDate);
 
-  dibujarEncabezadoPDF(doc, 'PLANILLA DE PEDIDO - ' + catA.toUpperCase() + ' / ' + catB.toUpperCase());
+  dibujarEncabezadoPDF(doc, 'PLANILLA DE PEDIDO - ' + cats.map(c=>c.toUpperCase()).join(' / '));
 
-  const rA = construirCuerpoCategoria(catA, bucket);
-  const rB = construirCuerpoCategoria(catB, bucket);
-  const offset = rA.body.length;
-  const bodyCombinado = rA.body.concat(rB.body);
-  const boundariesCombinado = rA.boundaries.concat(rB.boundaries.map(b => b + offset));
+  // Todas las categorías elegidas se unen en un solo flujo (como una sola planilla larga) y se
+  // reparten en tantas columnas como categorías combinadas — así cada columna es más corta y
+  // entra letra más grande, en vez de apretar todo siempre en solo 2 columnas.
+  let bodyCombinado = [];
+  let boundariesCombinado = [];
+  cats.forEach(cat=>{
+    const r = construirCuerpoCategoria(cat, bucket);
+    const offset = bodyCombinado.length;
+    bodyCombinado = bodyCombinado.concat(r.body);
+    boundariesCombinado = boundariesCombinado.concat(r.boundaries.map(b => b + offset));
+  });
 
+  const n = cats.length;
   const pageW = doc.internal.pageSize.getWidth();
   const margin = 22, gutter = 10;
-  const colWidth = (pageW - margin*2 - gutter) / 2;
-  const corte = elegirCorte(doc, bodyCombinado, boundariesCombinado, colWidth);
+  const colWidth = (pageW - margin*2 - gutter*(n-1)) / n;
+  const cortes = elegirCortesMultiples(doc, bodyCombinado, boundariesCombinado, colWidth, n);
 
-  renderizarDosColumnas(doc, bodyCombinado.slice(0, corte), bodyCombinado.slice(corte), 46);
+  renderizarColumnas(doc, partirEnColumnas(bodyCombinado, cortes), 46);
 
-  doc.save('Pedido_' + catA.replace(/\s+/g,'_') + '_' + catB.replace(/\s+/g,'_') + '_' + currentDate + '.pdf');
+  doc.save('Pedido_' + cats.map(c=>c.replace(/\s+/g,'_')).join('_') + '_' + currentDate + '.pdf');
 }
 
-function abrirSelectorCombinado(){
+function abrirSelectorCombinado(cantidad){
   const root = document.getElementById('modalRoot');
   let html = '<div class="modal-overlay" id="ovCombinado"><div class="modal">';
-  html += '<h2>Combinar 2 pestañas en una hoja</h2>';
-  html += '<div class="modal-sub">Marcá exactamente 2 categorías</div>';
+  html += '<h2>Combinar ' + cantidad + ' pestañas en una hoja</h2>';
+  html += '<div class="modal-sub">Marcá exactamente ' + cantidad + ' categorías</div>';
   html += '<ul style="list-style:none;padding:0;margin:0;">';
   CATEGORIES.forEach((cat,i)=>{
     html += '<li style="padding:8px 0;border-bottom:1px solid var(--linea);display:flex;align-items:center;gap:8px;">'
@@ -772,12 +801,12 @@ function abrirSelectorCombinado(){
   document.getElementById('ovCombinado').addEventListener('click', (e)=>{ if(e.target.id === 'ovCombinado') root.innerHTML = ''; });
   document.getElementById('generarCombinadoBtn').onclick = ()=>{
     const seleccion = Array.from(document.querySelectorAll('.chkCombo:checked')).map(el=>el.value);
-    if(seleccion.length !== 2){
-      alert('Elegí exactamente 2 categorías para combinar.');
+    if(seleccion.length !== cantidad){
+      alert('Elegí exactamente ' + cantidad + ' categorías para combinar.');
       return;
     }
     root.innerHTML = '';
-    generarPDFCombinado(seleccion[0], seleccion[1]);
+    generarPDFCombinado(seleccion);
   };
 }
 
@@ -793,7 +822,8 @@ document.getElementById('fecha').addEventListener('change', async (e)=>{
 document.getElementById('buscador').addEventListener('input', renderContent);
 document.getElementById('btnResumen').addEventListener('click', renderResumen);
 document.getElementById('btnPDF').addEventListener('click', generarPDF);
-document.getElementById('btnCombinado').addEventListener('click', abrirSelectorCombinado);
+document.getElementById('btnCombinado').addEventListener('click', ()=>abrirSelectorCombinado(2));
+document.getElementById('btnCombinado3').addEventListener('click', ()=>abrirSelectorCombinado(3));
 
 // ---------- Instalación como app + service worker ----------
 if('serviceWorker' in navigator){
