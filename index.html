@@ -13,6 +13,16 @@
 <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-auth-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore-compat.js"></script>
+<script>
+  // Consola visible en el celular: abrí la app agregando ?debug al final del link
+  // (ej: https://tu-repo.github.io/pedidos-produccion/?debug) para ver errores sin necesitar PC.
+  if(location.search.includes('debug')){
+    var s = document.createElement('script');
+    s.src = 'https://cdn.jsdelivr.net/npm/eruda';
+    s.onload = function(){ eruda.init(); };
+    document.head.appendChild(s);
+  }
+</script>
 <style>
   :root{
     --masa:#fbf6ee;
@@ -430,12 +440,16 @@ function guardarCampo(cat, id, name, campo, valor){
   document.getElementById('footerSave').textContent = '… guardando';
   debounceTimers[key] = setTimeout(()=>{
     const ref = db.collection('pedidos').doc(currentDate).collection('items').doc(id);
+    console.log('Guardando en pedidos/' + currentDate + '/items/' + id, { cat, name, [campo]: valor });
     ref.set({
       cat, name, [campo]: valor,
       actualizadoPor: currentUser ? currentUser.email : '',
       actualizadoEn: firebase.firestore.FieldValue.serverTimestamp()
-    }, { merge:true }).catch(()=>{
-      document.getElementById('footerSave').textContent = '⚠ se guardará al volver la conexión';
+    }, { merge:true }).then(()=>{
+      console.log('Guardado OK en pedidos/' + currentDate + '/items/' + id);
+    }).catch((err)=>{
+      console.error('ERROR al guardar en pedidos/' + currentDate + '/items/' + id, err);
+      document.getElementById('footerSave').textContent = '⚠ error: ' + (err.code || err.message || err);
     });
 
     if(campo === 's'){
@@ -443,7 +457,7 @@ function guardarCampo(cat, id, name, campo, valor){
         cat, name, s: valor,
         actualizadoPor: currentUser ? currentUser.email : '',
         actualizadoEn: firebase.firestore.FieldValue.serverTimestamp()
-      }, { merge:true }).catch(()=>{});
+      }, { merge:true }).catch((err)=>{ console.error('ERROR al guardar stock_actual', err); });
     }
   }, 450);
 }
