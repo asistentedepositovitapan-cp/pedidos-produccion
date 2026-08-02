@@ -620,7 +620,8 @@ function construirCuerpoCategoria(cat, bucket){
       if(item.type === 'day'){
         body.push([{ content: item.label, colSpan: 3, styles:{ fontStyle:'italic', fillColor: false, textColor:[95,95,95] } }]);
       } else {
-        const e = (bucket[cat] && bucket[cat][item.id]) || {s:'', p:''};
+        const existente = bucket[cat] && bucket[cat][item.id];
+        const e = existente || { s: (lastStock[item.id] ? lastStock[item.id].s : ''), p: '' };
         body.push([item.name, e.s !== '' ? String(e.s) : '', e.p !== '' ? String(e.p) : '']);
       }
     });
