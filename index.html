@@ -243,6 +243,8 @@
 </head>
 <body>
 
+<div id="splashScreen" style="position:fixed;inset:0;z-index:9999;background:#f7b955 url('splash.jpg') center/cover no-repeat;transition:opacity .4s ease;"></div>
+
 <div id="loginOverlay" class="modal-overlay" style="align-items:center;">
   <div class="modal" style="border-radius:16px; max-width:340px;">
     <h2>🥖 Pedidos de Producción</h2>
@@ -340,6 +342,18 @@ function ensureDateBucket(fecha){
 }
 
 // ---------- Autenticación ----------
+function ocultarSplash(){
+  const splash = document.getElementById('splashScreen');
+  if(!splash) return;
+  splash.style.opacity = '0';
+  setTimeout(()=> splash.remove(), 450);
+}
+// Mínimo 900ms visible (para que no sea un parpadeo) y máximo 4s por si algo tarda en responder.
+const splashMinTime = new Promise(res => setTimeout(res, 900));
+const splashMaxTime = new Promise(res => setTimeout(res, 4000));
+let splashListo = false;
+Promise.race([splashMaxTime]).then(()=>{ if(!splashListo){ splashListo=true; ocultarSplash(); } });
+
 auth.onAuthStateChanged(user=>{
   if(user){
     currentUser = user;
@@ -350,6 +364,10 @@ auth.onAuthStateChanged(user=>{
     currentUser = null;
     document.getElementById('loginOverlay').classList.remove('hidden');
   }
+  if(!splashListo){
+    splashListo = true;
+    splashMinTime.then(ocultarSplash);
+  }
 });
 
 document.getElementById('loginForm').addEventListener('submit', (e)=>{
@@ -359,7 +377,7 @@ document.getElementById('loginForm').addEventListener('submit', (e)=>{
   const errEl = document.getElementById('loginError');
   errEl.textContent = '';
   auth.signInWithEmailAndPassword(email, pass).catch(err=>{
-    errEl.textContent = 'No se pudo iniciar sesión: ' + (err.message || err.code);
+    errEl.textContent = 'Usuario o contraseña incorrectos. Volvé a intentarlo.';
   });
 });
 

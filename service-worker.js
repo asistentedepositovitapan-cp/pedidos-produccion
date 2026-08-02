@@ -1,8 +1,9 @@
-const CACHE_NAME = 'pedidos-produccion-v1';
+const CACHE_NAME = 'pedidos-produccion-v6';
 const ARCHIVOS_CACHE = [
   './',
   './index.html',
   './manifest.json',
+  './splash.jpg',
   './icons/icon-192.png',
   './icons/icon-512.png'
 ];
