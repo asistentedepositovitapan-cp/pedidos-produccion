@@ -749,6 +749,12 @@ function renderizarColumnas(doc, bodies, topY){
   });
 }
 
+// Nombre de sucursal según el usuario logueado (por ahora los 2 que ya existen en Firebase).
+const SUCURSAL_POR_USUARIO = {
+  'gralsantos@vitapan.com': 'Sucursal Gral Santos',
+  'produccion@vitapan.com': 'Centro de Producción'
+};
+
 function dibujarEncabezadoPDF(doc, titulo){
   doc.setTextColor(0,0,0);
   doc.setFontSize(11);
@@ -757,6 +763,11 @@ function dibujarEncabezadoPDF(doc, titulo){
   doc.setTextColor(70,70,70);
   doc.text('Fecha: ' + currentDate, 22, 30);
   doc.text('VitaPan', doc.internal.pageSize.getWidth() - 22, 30, { align:'right' });
+  const email = currentUser ? currentUser.email : '';
+  const sucursal = SUCURSAL_POR_USUARIO[email] || email || '';
+  if(sucursal){
+    doc.text(sucursal, doc.internal.pageSize.getWidth() - 22, 40, { align:'right' });
+  }
 }
 
 function generarPDF(){
@@ -777,7 +788,7 @@ function generarPDF(){
   const { body, boundaries } = construirCuerpoCategoria(currentCat, bucket);
   const cortes = elegirCortesMultiples(doc, body, boundaries, colWidth, n);
 
-  renderizarColumnas(doc, partirEnColumnas(body, cortes), 46);
+  renderizarColumnas(doc, partirEnColumnas(body, cortes), 50);
 
   doc.save('Pedido_' + currentCat.replace(/\s+/g,'_') + '_' + currentDate + '.pdf');
 }
@@ -811,7 +822,7 @@ function generarPDFCombinado(cats){
   const colWidth = (pageW - margin*2 - gutter*(n-1)) / n;
   const cortes = elegirCortesMultiples(doc, bodyCombinado, boundariesCombinado, colWidth, n);
 
-  renderizarColumnas(doc, partirEnColumnas(bodyCombinado, cortes), 46);
+  renderizarColumnas(doc, partirEnColumnas(bodyCombinado, cortes), 50);
 
   doc.save('Pedido_' + cats.map(c=>c.replace(/\s+/g,'_')).join('_') + '_' + currentDate + '.pdf');
 }
