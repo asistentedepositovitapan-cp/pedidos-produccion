@@ -10,6 +10,7 @@
 <link rel="apple-touch-icon" href="icons/icon-192.png">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.8.2/jspdf.plugin.autotable.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/exceljs/4.4.0/exceljs.min.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-auth-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore-compat.js"></script>
@@ -280,6 +281,7 @@
     <input type="text" id="buscador" placeholder="Buscar producto en esta pestaña...">
     <button class="summary-btn" id="btnResumen">Ver resumen</button>
     <button class="summary-btn" id="btnPDF">PDF</button>
+    <button class="summary-btn" id="btnExcel">Excel</button>
     <button class="summary-btn" id="btnCombinado">Combinar 2</button>
     <button class="summary-btn" id="btnCombinado3">Combinar 3</button>
     <select id="orientacionPDF" class="summary-btn" style="cursor:pointer;">
@@ -932,6 +934,113 @@ function generarPDFCombinado(cats){
   doc.save('Pedido_' + cats.map(c=>c.replace(/\s+/g,'_')).join('_') + '_' + currentDate + '.pdf');
 }
 
+// ---------- Excel ----------
+const COLOR_HEADER = 'FF464646';
+const COLOR_SECCION = 'FFE3E3E3';
+const COLOR_DIA = 'FFF4D9C6';
+const COLOR_BORDE = 'FFB4B4B4';
+
+const bordeFino = { top:{style:'thin', color:{argb:COLOR_BORDE}}, left:{style:'thin', color:{argb:COLOR_BORDE}}, bottom:{style:'thin', color:{argb:COLOR_BORDE}}, right:{style:'thin', color:{argb:COLOR_BORDE}} };
+
+// Escribe el bloque de una categoría (encabezado + secciones + productos) a partir de la columna
+// colOffset (1 = A), y devuelve cuántas filas ocupó y el ancho de nombre más largo que encontró.
+function escribirBloqueCategoriaExcel(ws, cat, bucket, colOffset, filaInicio){
+  let fila = filaInicio;
+  let anchoMax = 10;
+
+  const headCells = [ws.getCell(fila, colOffset), ws.getCell(fila, colOffset+1), ws.getCell(fila, colOffset+2)];
+  ['Producto','S','P'].forEach((txt,i)=>{
+    headCells[i].value = txt;
+    headCells[i].font = { bold:true, color:{argb:'FFFFFFFF'} };
+    headCells[i].fill = { type:'pattern', pattern:'solid', fgColor:{argb:COLOR_HEADER} };
+    headCells[i].border = bordeFino;
+    headCells[i].alignment = { horizontal: i===0 ? 'left' : 'center' };
+  });
+  fila++;
+
+  catalogoActual()[cat].forEach(section=>{
+    ws.mergeCells(fila, colOffset, fila, colOffset+2);
+    const c = ws.getCell(fila, colOffset);
+    c.value = section.title;
+    c.font = { bold:true };
+    c.fill = { type:'pattern', pattern:'solid', fgColor:{argb:COLOR_SECCION} };
+    for(let cc=colOffset; cc<=colOffset+2; cc++) ws.getCell(fila, cc).border = bordeFino;
+    if(section.title.length > anchoMax) anchoMax = section.title.length;
+    fila++;
+
+    section.items.forEach(item=>{
+      if(item.type === 'day'){
+        ws.mergeCells(fila, colOffset, fila, colOffset+2);
+        const dc = ws.getCell(fila, colOffset);
+        dc.value = item.label;
+        dc.font = { italic:true, color:{argb:'FF5F5F5F'} };
+        dc.fill = { type:'pattern', pattern:'solid', fgColor:{argb:COLOR_DIA} };
+        for(let cc=colOffset; cc<=colOffset+2; cc++) ws.getCell(fila, cc).border = bordeFino;
+        fila++;
+      } else {
+        const existente = bucket[cat] && bucket[cat][item.id];
+        const stockPrevio = lastStock[currentArea] && lastStock[currentArea][item.id];
+        const e = existente || { s: (stockPrevio ? stockPrevio.s : ''), p: '' };
+        const nombreCell = ws.getCell(fila, colOffset);
+        const sCell = ws.getCell(fila, colOffset+1);
+        const pCell = ws.getCell(fila, colOffset+2);
+        nombreCell.value = item.name;
+        sCell.value = e.s !== '' ? Number(e.s) : null;
+        pCell.value = e.p !== '' ? Number(e.p) : null;
+        sCell.alignment = { horizontal:'center' };
+        pCell.alignment = { horizontal:'center' };
+        [nombreCell, sCell, pCell].forEach(c=> c.border = bordeFino);
+        if(item.name.length > anchoMax) anchoMax = item.name.length;
+        fila++;
+      }
+    });
+  });
+
+  ws.getColumn(colOffset).width = Math.min(anchoMax + 2, 45);
+  ws.getColumn(colOffset+1).width = 7;
+  ws.getColumn(colOffset+2).width = 7;
+
+  return fila - filaInicio;
+}
+
+async function descargarWorkbook(workbook, nombreArchivo){
+  const buffer = await workbook.xlsx.writeBuffer();
+  const blob = new Blob([buffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url; a.download = nombreArchivo;
+  document.body.appendChild(a); a.click(); a.remove();
+  URL.revokeObjectURL(url);
+}
+
+async function generarExcel(cat){
+  if(!window.ExcelJS){
+    alert('No se pudo cargar el generador de Excel. Verificá tu conexión a internet e intentá de nuevo.');
+    return;
+  }
+  const bucket = ensureDateBucket(currentDate);
+  const workbook = new ExcelJS.Workbook();
+  const ws = workbook.addWorksheet(cat.slice(0,31));
+  escribirBloqueCategoriaExcel(ws, cat, bucket, 1, 1);
+  await descargarWorkbook(workbook, 'Pedido_' + cat.replace(/\s+/g,'_') + '_' + currentDate + '.xlsx');
+}
+
+async function generarExcelCombinado(cats){
+  if(!window.ExcelJS){
+    alert('No se pudo cargar el generador de Excel. Verificá tu conexión a internet e intentá de nuevo.');
+    return;
+  }
+  const bucket = ensureDateBucket(currentDate);
+  const workbook = new ExcelJS.Workbook();
+  const ws = workbook.addWorksheet('Pedido combinado'.slice(0,31));
+  let colOffset = 1;
+  cats.forEach(cat=>{
+    escribirBloqueCategoriaExcel(ws, cat, bucket, colOffset, 1);
+    colOffset += 3; // sin espacio entre bloques, pegados como en el PDF
+  });
+  await descargarWorkbook(workbook, 'Pedido_' + cats.map(c=>c.replace(/\s+/g,'_')).join('_') + '_' + currentDate + '.xlsx');
+}
+
 function abrirSelectorCombinado(min, max){
   const root = document.getElementById('modalRoot');
   const rango = (min === max) ? ('Marcá exactamente ' + min + ' categorías') : ('Marcá entre ' + min + ' y ' + max + ' categorías');
@@ -945,18 +1054,34 @@ function abrirSelectorCombinado(min, max){
       + '<label for="chkCombo' + i + '" style="font-size:.85rem;">' + cat + '</label></li>';
   });
   html += '</ul>';
-  html += '<button class="modal-close" id="generarCombinadoBtn">Generar PDF</button>';
+  html += '<div style="display:flex;gap:8px;margin-top:14px;">';
+  html += '<button class="modal-close" id="generarCombinadoPDF" style="margin-top:0;flex:1;">PDF</button>';
+  html += '<button class="modal-close" id="generarCombinadoExcel" style="margin-top:0;flex:1;background:var(--ok);">Excel</button>';
+  html += '</div>';
   html += '</div></div>';
   root.innerHTML = html;
   document.getElementById('ovCombinado').addEventListener('click', (e)=>{ if(e.target.id === 'ovCombinado') root.innerHTML = ''; });
-  document.getElementById('generarCombinadoBtn').onclick = ()=>{
+
+  function leerSeleccion(){
     const seleccion = Array.from(document.querySelectorAll('.chkCombo:checked')).map(el=>el.value);
     if(seleccion.length < min || seleccion.length > max){
       alert(rango + '.');
-      return;
+      return null;
     }
+    return seleccion;
+  }
+
+  document.getElementById('generarCombinadoPDF').onclick = ()=>{
+    const seleccion = leerSeleccion();
+    if(!seleccion) return;
     root.innerHTML = '';
     generarPDFCombinado(seleccion);
+  };
+  document.getElementById('generarCombinadoExcel').onclick = ()=>{
+    const seleccion = leerSeleccion();
+    if(!seleccion) return;
+    root.innerHTML = '';
+    generarExcelCombinado(seleccion);
   };
 }
 
@@ -989,6 +1114,7 @@ document.getElementById('fecha').addEventListener('change', async (e)=>{
 document.getElementById('buscador').addEventListener('input', renderContent);
 document.getElementById('btnResumen').addEventListener('click', renderResumen);
 document.getElementById('btnPDF').addEventListener('click', generarPDF);
+document.getElementById('btnExcel').addEventListener('click', ()=>generarExcel(currentCat));
 document.getElementById('orientacionPDF').addEventListener('change', (e)=>{ orientacionPDF = e.target.value; });
 actualizarBotonesCombinar();
 
