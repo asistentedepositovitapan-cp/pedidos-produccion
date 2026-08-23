@@ -775,7 +775,7 @@ function ajustarFuenteN(doc, bodies, colWidth, alturaDisponible){
 }
 
 // Umbral de letra "cómoda": si con 1 columna ya se lee bien, no hace falta abrir una segunda.
-const FONT_COMODO = 7.2;
+const FONT_COMODO = 7.8;
 
 // Prueba de 1 en más columnas y se queda con la menor cantidad que permite una letra cómoda
 // (o, si ni con el máximo alcanza, la que mejor entra). Así una categoría chica como Lácteos
@@ -891,7 +891,7 @@ function generarPDF(){
   const pageW = doc.internal.pageSize.getWidth();
   const pageH = doc.internal.pageSize.getHeight();
   const { body, boundaries } = construirCuerpoCategoria(currentCat, bucket);
-  const { columnas, colWidth, fontSize, cellPadding } = elegirNumeroColumnas(doc, body, boundaries, 4, pageW, pageH, topY, margin, gutter);
+  const { columnas, colWidth, fontSize, cellPadding } = elegirNumeroColumnas(doc, body, boundaries, 5, pageW, pageH, topY, margin, gutter);
 
   renderizarColumnas(doc, columnas, topY, colWidth, fontSize, cellPadding, margin, gutter);
 
@@ -924,7 +924,8 @@ function generarPDFCombinado(cats){
   const margin = 22, gutter = 0, topY = 50;
   const pageW = doc.internal.pageSize.getWidth();
   const pageH = doc.internal.pageSize.getHeight();
-  const { columnas, colWidth, fontSize, cellPadding } = elegirNumeroColumnas(doc, bodyCombinado, boundariesCombinado, cats.length, pageW, pageH, topY, margin, gutter);
+  const maxColumnasCombinado = Math.max(cats.length, 6);
+  const { columnas, colWidth, fontSize, cellPadding } = elegirNumeroColumnas(doc, bodyCombinado, boundariesCombinado, maxColumnasCombinado, pageW, pageH, topY, margin, gutter);
 
   renderizarColumnas(doc, columnas, topY, colWidth, fontSize, cellPadding, margin, gutter);
 
