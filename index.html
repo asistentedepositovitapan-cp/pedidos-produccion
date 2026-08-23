@@ -282,6 +282,10 @@
     <button class="summary-btn" id="btnPDF">PDF</button>
     <button class="summary-btn" id="btnCombinado">Combinar 2</button>
     <button class="summary-btn" id="btnCombinado3">Combinar 3</button>
+    <select id="orientacionPDF" class="summary-btn" style="cursor:pointer;">
+      <option value="p">PDF vertical</option>
+      <option value="l">PDF horizontal</option>
+    </select>
   </div>
   <div id="contenido"></div>
 </main>
@@ -346,6 +350,7 @@ let data = {};       // { area: { fecha: { categoria: { id: {s,p} } } } }
 let lastStock = {};  // { area: { id: {s, cat, name} } } -- último stock conocido, cruza fechas, por área
 let inputRefs = {};  // { id: {sInput, pInput, row} } -- solo de la pestaña/fecha visibles ahora
 let unsubItems = null;
+let orientacionPDF = 'p'; // 'p' vertical, 'l' horizontal
 const debounceTimers = {};
 
 function ensureDateBucket(fecha){
@@ -522,6 +527,7 @@ async function cambiarArea(area){
   renderAreaSelector();
   renderTabs();
   renderContent();
+  actualizarBotonesCombinar();
   document.getElementById('statusPill').textContent = 'cargando…';
   await cargarFechaInicial(currentDate);
   suscribirseAFecha(currentDate);
@@ -768,15 +774,28 @@ function ajustarFuenteN(doc, bodies, colWidth, alturaDisponible){
   return { fontSize: Math.max(fontSize, 3), cellPadding };
 }
 
-function renderizarColumnas(doc, bodies, topY){
-  const pageW = doc.internal.pageSize.getWidth();
-  const pageH = doc.internal.pageSize.getHeight();
-  const margin = 22, gutter = 10;
-  const n = bodies.length;
-  const colWidth = (pageW - margin*2 - gutter*(n-1)) / n;
-  const alturaDisponible = pageH - topY - margin;
+// Umbral de letra "cómoda": si con 1 columna ya se lee bien, no hace falta abrir una segunda.
+const FONT_COMODO = 7.2;
 
-  const { fontSize, cellPadding } = ajustarFuenteN(doc, bodies, colWidth, alturaDisponible);
+// Prueba de 1 en más columnas y se queda con la menor cantidad que permite una letra cómoda
+// (o, si ni con el máximo alcanza, la que mejor entra). Así una categoría chica como Lácteos
+// puede quedar en 1 sola columna, y una grande sigue abriendo las columnas que necesite.
+function elegirNumeroColumnas(doc, body, boundaries, maxColumnas, pageW, pageH, topY, margin, gutter){
+  let mejor = null;
+  for(let n=1; n<=maxColumnas; n++){
+    const colWidth = (pageW - margin*2 - gutter*(n-1)) / n;
+    const cortes = elegirCortesMultiples(doc, body, boundaries, colWidth, n);
+    const columnas = partirEnColumnas(body, cortes);
+    const alturaDisponible = pageH - topY - margin;
+    const { fontSize, cellPadding } = ajustarFuenteN(doc, columnas, colWidth, alturaDisponible);
+    mejor = { n, columnas, colWidth, fontSize, cellPadding };
+    if(fontSize >= FONT_COMODO) break;
+  }
+  return mejor;
+}
+
+function renderizarColumnas(doc, bodies, topY, colWidth, fontSize, cellPadding, margin, gutter){
+  const pageW = doc.internal.pageSize.getWidth();
 
   const estiloBase = {
     styles:{ fontSize:fontSize, cellPadding:cellPadding, textColor:[20,20,20], lineColor:[180,180,180], lineWidth:0.4, overflow:'linebreak' },
@@ -827,19 +846,18 @@ function generarPDF(){
     return;
   }
   const { jsPDF } = window.jspdf;
-  const doc = new jsPDF({ unit:'pt', format:'a4' });
+  const doc = new jsPDF({ unit:'pt', format:'a4', orientation: orientacionPDF === 'l' ? 'landscape' : 'portrait' });
   const bucket = ensureDateBucket(currentDate);
 
   dibujarEncabezadoPDF(doc, 'PLANILLA DE PEDIDO - ' + currentCat.toUpperCase());
 
-  const n = 2; // una sola categoría siempre se reparte en 2 columnas
+  const margin = 22, gutter = 5, topY = 50;
   const pageW = doc.internal.pageSize.getWidth();
-  const margin = 22, gutter = 10;
-  const colWidth = (pageW - margin*2 - gutter*(n-1)) / n;
+  const pageH = doc.internal.pageSize.getHeight();
   const { body, boundaries } = construirCuerpoCategoria(currentCat, bucket);
-  const cortes = elegirCortesMultiples(doc, body, boundaries, colWidth, n);
+  const { columnas, colWidth, fontSize, cellPadding } = elegirNumeroColumnas(doc, body, boundaries, 4, pageW, pageH, topY, margin, gutter);
 
-  renderizarColumnas(doc, partirEnColumnas(body, cortes), 50);
+  renderizarColumnas(doc, columnas, topY, colWidth, fontSize, cellPadding, margin, gutter);
 
   doc.save('Pedido_' + currentCat.replace(/\s+/g,'_') + '_' + currentDate + '.pdf');
 }
@@ -850,14 +868,14 @@ function generarPDFCombinado(cats){
     return;
   }
   const { jsPDF } = window.jspdf;
-  const doc = new jsPDF({ unit:'pt', format:'a4' });
+  const doc = new jsPDF({ unit:'pt', format:'a4', orientation: orientacionPDF === 'l' ? 'landscape' : 'portrait' });
   const bucket = ensureDateBucket(currentDate);
 
   dibujarEncabezadoPDF(doc, 'PLANILLA DE PEDIDO - ' + cats.map(c=>c.toUpperCase()).join(' / '));
 
-  // Todas las categorías elegidas se unen en un solo flujo (como una sola planilla larga) y se
-  // reparten en tantas columnas como categorías combinadas — así cada columna es más corta y
-  // entra letra más grande, en vez de apretar todo siempre en solo 2 columnas.
+  // Todas las categorías elegidas se unen en un solo flujo (como una sola planilla larga). Si una
+  // categoría (ej. Lácteos) no llena su espacio, la siguiente sigue completando desde ahí mismo,
+  // en vez de siempre arrancar una columna nueva por categoría.
   let bodyCombinado = [];
   let boundariesCombinado = [];
   cats.forEach(cat=>{
@@ -867,22 +885,22 @@ function generarPDFCombinado(cats){
     boundariesCombinado = boundariesCombinado.concat(r.boundaries.map(b => b + offset));
   });
 
-  const n = cats.length;
+  const margin = 22, gutter = 5, topY = 50;
   const pageW = doc.internal.pageSize.getWidth();
-  const margin = 22, gutter = 10;
-  const colWidth = (pageW - margin*2 - gutter*(n-1)) / n;
-  const cortes = elegirCortesMultiples(doc, bodyCombinado, boundariesCombinado, colWidth, n);
+  const pageH = doc.internal.pageSize.getHeight();
+  const { columnas, colWidth, fontSize, cellPadding } = elegirNumeroColumnas(doc, bodyCombinado, boundariesCombinado, cats.length, pageW, pageH, topY, margin, gutter);
 
-  renderizarColumnas(doc, partirEnColumnas(bodyCombinado, cortes), 50);
+  renderizarColumnas(doc, columnas, topY, colWidth, fontSize, cellPadding, margin, gutter);
 
   doc.save('Pedido_' + cats.map(c=>c.replace(/\s+/g,'_')).join('_') + '_' + currentDate + '.pdf');
 }
 
-function abrirSelectorCombinado(cantidad){
+function abrirSelectorCombinado(min, max){
   const root = document.getElementById('modalRoot');
+  const rango = (min === max) ? ('Marcá exactamente ' + min + ' categorías') : ('Marcá entre ' + min + ' y ' + max + ' categorías');
   let html = '<div class="modal-overlay" id="ovCombinado"><div class="modal">';
-  html += '<h2>Combinar ' + cantidad + ' pestañas en una hoja</h2>';
-  html += '<div class="modal-sub">Marcá exactamente ' + cantidad + ' categorías</div>';
+  html += '<h2>Combinar pestañas en una hoja</h2>';
+  html += '<div class="modal-sub">' + rango + '</div>';
   html += '<ul style="list-style:none;padding:0;margin:0;">';
   categoriasActuales().forEach((cat,i)=>{
     html += '<li style="padding:8px 0;border-bottom:1px solid var(--linea);display:flex;align-items:center;gap:8px;">'
@@ -896,13 +914,30 @@ function abrirSelectorCombinado(cantidad){
   document.getElementById('ovCombinado').addEventListener('click', (e)=>{ if(e.target.id === 'ovCombinado') root.innerHTML = ''; });
   document.getElementById('generarCombinadoBtn').onclick = ()=>{
     const seleccion = Array.from(document.querySelectorAll('.chkCombo:checked')).map(el=>el.value);
-    if(seleccion.length !== cantidad){
-      alert('Elegí exactamente ' + cantidad + ' categorías para combinar.');
+    if(seleccion.length < min || seleccion.length > max){
+      alert(rango + '.');
       return;
     }
     root.innerHTML = '';
     generarPDFCombinado(seleccion);
   };
+}
+
+// Los botones de combinar cambian según el área: Producción mantiene 2 y 3 pestañas exactas;
+// Depósito (categorías más chicas) admite combinar entre 2 y 5 en una sola hoja.
+function actualizarBotonesCombinar(){
+  const btn2 = document.getElementById('btnCombinado');
+  const btn3 = document.getElementById('btnCombinado3');
+  if(currentArea === 'deposito'){
+    btn2.textContent = 'Combinar (2 a 5)';
+    btn2.onclick = ()=> abrirSelectorCombinado(2, 5);
+    btn3.style.display = 'none';
+  } else {
+    btn2.textContent = 'Combinar 2';
+    btn2.onclick = ()=> abrirSelectorCombinado(2, 2);
+    btn3.style.display = '';
+    btn3.onclick = ()=> abrirSelectorCombinado(3, 3);
+  }
 }
 
 // ---------- Eventos ----------
@@ -917,8 +952,8 @@ document.getElementById('fecha').addEventListener('change', async (e)=>{
 document.getElementById('buscador').addEventListener('input', renderContent);
 document.getElementById('btnResumen').addEventListener('click', renderResumen);
 document.getElementById('btnPDF').addEventListener('click', generarPDF);
-document.getElementById('btnCombinado').addEventListener('click', ()=>abrirSelectorCombinado(2));
-document.getElementById('btnCombinado3').addEventListener('click', ()=>abrirSelectorCombinado(3));
+document.getElementById('orientacionPDF').addEventListener('change', (e)=>{ orientacionPDF = e.target.value; });
+actualizarBotonesCombinar();
 
 // ---------- Instalación como app + service worker ----------
 if('serviceWorker' in navigator){
