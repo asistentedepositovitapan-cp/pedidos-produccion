@@ -851,7 +851,7 @@ function generarPDF(){
 
   dibujarEncabezadoPDF(doc, 'PLANILLA DE PEDIDO - ' + currentCat.toUpperCase());
 
-  const margin = 22, gutter = 5, topY = 50;
+  const margin = 22, gutter = 0, topY = 50;
   const pageW = doc.internal.pageSize.getWidth();
   const pageH = doc.internal.pageSize.getHeight();
   const { body, boundaries } = construirCuerpoCategoria(currentCat, bucket);
@@ -885,7 +885,7 @@ function generarPDFCombinado(cats){
     boundariesCombinado = boundariesCombinado.concat(r.boundaries.map(b => b + offset));
   });
 
-  const margin = 22, gutter = 5, topY = 50;
+  const margin = 22, gutter = 0, topY = 50;
   const pageW = doc.internal.pageSize.getWidth();
   const pageH = doc.internal.pageSize.getHeight();
   const { columnas, colWidth, fontSize, cellPadding } = elegirNumeroColumnas(doc, bodyCombinado, boundariesCombinado, cats.length, pageW, pageH, topY, margin, gutter);
