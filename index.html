@@ -794,28 +794,64 @@ function elegirNumeroColumnas(doc, body, boundaries, maxColumnas, pageW, pageH, 
   return mejor;
 }
 
+// Mide el ancho real que necesita cada columna (Producto / S / P) de UNA columna de la hoja,
+// usando el mismo texto que se va a imprimir — así la tabla que sigue puede empezar justo
+// donde termina esta, sin ningún hueco entre ambas.
+function medirAnchosColumna(doc, body, fontSize, cellPadding, anchoNombreMax){
+  const headFontSize = Math.min(fontSize+0.5, 8.5);
+  doc.setFontSize(headFontSize);
+  let anchoProducto = doc.getTextWidth('Producto');
+  let anchoS = doc.getTextWidth('S');
+  let anchoP = doc.getTextWidth('P');
+
+  doc.setFontSize(fontSize);
+  body.forEach(row=>{
+    if(row.length === 1) return; // fila de sección o de día, no cuenta para el ancho de las columnas
+    const wNombre = Math.min(doc.getTextWidth(String(row[0])), anchoNombreMax);
+    if(wNombre > anchoProducto) anchoProducto = wNombre;
+    const wS = doc.getTextWidth(String(row[1] || ''));
+    if(wS > anchoS) anchoS = wS;
+    const wP = doc.getTextWidth(String(row[2] || ''));
+    if(wP > anchoP) anchoP = wP;
+  });
+
+  const relleno = cellPadding*2 + 2;
+  return {
+    producto: anchoProducto + relleno,
+    s: anchoS + relleno,
+    p: anchoP + relleno
+  };
+}
+
 function renderizarColumnas(doc, bodies, topY, colWidth, fontSize, cellPadding, margin, gutter){
-  const pageW = doc.internal.pageSize.getWidth();
+  const anchoFijo = 12;
+  const anchoNombreMax = Math.max(15, colWidth - anchoFijo*2 - cellPadding*6 - 6);
 
   const estiloBase = {
     styles:{ fontSize:fontSize, cellPadding:cellPadding, textColor:[20,20,20], lineColor:[180,180,180], lineWidth:0.4, overflow:'linebreak' },
     headStyles:{ fillColor:[70,70,70], textColor:255, fontSize:Math.min(fontSize+0.5, 8.5) },
-    // Las 3 columnas se ajustan a lo que realmente necesitan (nombre, y los números cortos de S/P)
-    // en vez de reservar siempre el mismo ancho fijo. Encabezados S/P como en la planilla original.
-    columnStyles:{ 0:{ cellWidth:'wrap' }, 1:{ cellWidth:'wrap', halign:'center' }, 2:{ cellWidth:'wrap', halign:'center' } },
     pageBreak:'avoid'
   };
 
-  bodies.forEach((b, i)=>{
-    const left = margin + i*(colWidth + gutter);
-    const right = pageW - left - colWidth;
+  let cursorX = margin;
+  bodies.forEach((b)=>{
+    const anchos = medirAnchosColumna(doc, b, fontSize, cellPadding, anchoNombreMax);
+    const anchoTotal = anchos.producto + anchos.s + anchos.p;
+
     doc.autoTable(Object.assign({
       head: [['Producto','S','P']],
       body: b,
       startY: topY,
-      margin:{ left: left, right: right },
-      tableWidth: 'wrap'
+      margin:{ left: cursorX, right: doc.internal.pageSize.getWidth() - cursorX - anchoTotal },
+      tableWidth: anchoTotal,
+      columnStyles:{
+        0:{ cellWidth: anchos.producto },
+        1:{ cellWidth: anchos.s, halign:'center' },
+        2:{ cellWidth: anchos.p, halign:'center' }
+      }
     }, estiloBase));
+
+    cursorX += anchoTotal + gutter;
   });
 }
 
