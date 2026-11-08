@@ -244,7 +244,73 @@
 </head>
 <body>
 
-<div id="splashScreen" style="position:fixed;inset:0;z-index:9999;background:#f7b955 url('splash.jpg') center/cover no-repeat;transition:opacity .4s ease;"></div>
+<style>
+  #splashScreen{position:fixed;inset:0;z-index:9999;overflow:hidden;display:flex;align-items:center;justify-content:center;flex-direction:column;text-align:center;color:#fff;transition:opacity .45s ease;cursor:pointer;font-family:system-ui,-apple-system,"Segoe UI",sans-serif;}
+  #splashScreen .sp-emoji-main{font-size:5.2rem;animation:spPop 1.4s ease-out both, spFloat 3s ease-in-out 1.4s infinite;filter:drop-shadow(0 6px 10px rgba(0,0,0,.25));}
+  #splashScreen .sp-hola{font-size:1.1rem;letter-spacing:.18em;text-transform:uppercase;opacity:.9;margin-top:10px;animation:spUp .8s .3s both;}
+  #splashScreen .sp-titulo{font-size:2.6rem;font-weight:800;line-height:1.1;margin:4px 14px 0;text-shadow:0 3px 10px rgba(0,0,0,.25);animation:spUp .8s .5s both;}
+  #splashScreen .sp-sub{font-size:1rem;margin:10px 24px 0;opacity:.95;animation:spUp .8s .7s both;}
+  #splashScreen .sp-app{position:absolute;bottom:26px;left:0;right:0;font-size:.78rem;opacity:.85;letter-spacing:.05em;}
+  #splashScreen .sp-part{position:absolute;top:-12%;animation:spFall linear infinite;pointer-events:none;user-select:none;}
+  @keyframes spFall{to{transform:translateY(125vh) rotate(360deg);}}
+  @keyframes spPop{0%{transform:scale(.2) rotate(-20deg);opacity:0;}60%{transform:scale(1.15) rotate(6deg);opacity:1;}100%{transform:scale(1) rotate(0);}}
+  @keyframes spFloat{0%,100%{transform:translateY(0);}50%{transform:translateY(-10px);}}
+  @keyframes spUp{from{opacity:0;transform:translateY(18px);}to{opacity:1;transform:none;}}
+</style>
+<div id="splashScreen"></div>
+<script>
+// Pantalla de apertura: cambia sola según el mes y fechas especiales. Para agregar o cambiar fechas, editar estas dos tablas.
+(function(){
+  var MESES = [
+    {n:'Enero',   bg:['#ff9a3c','#f2545b'], e:'☀️', p:['🏖️','🍉','☀️','🍦'],      s:'Arrancamos el año con todo'},
+    {n:'Febrero', bg:['#f857a6','#ff5858'], e:'🎭', p:['🎭','🎊','🥳','🎉'],      s:'Mes de carnaval y buena energía'},
+    {n:'Marzo',   bg:['#f6a14b','#c2611f'], e:'🍂', p:['🍂','🍁','🥐','🍞'],      s:'Llega el otoño'},
+    {n:'Abril',   bg:['#7f7fd5','#86a8e7'], e:'🐣', p:['🐣','🥚','🌷','🍫'],      s:'Mes de Pascuas'},
+    {n:'Mayo',    bg:['#3f6fd8','#c0392b'], e:'🇵🇾', p:['🇵🇾','⭐','🌹','🥖'],      s:'Mes de la Patria'},
+    {n:'Junio',   bg:['#4b79a1','#283e51'], e:'🧣', p:['❄️','☕','🧣','🥐'],      s:'Frío y café calentito'},
+    {n:'Julio',   bg:['#5c6bc0','#1a237e'], e:'☕', p:['❄️','☕','🍩','🥖'],      s:'Pleno invierno, pan recién hecho'},
+    {n:'Agosto',  bg:['#f7b955','#e0782b'], e:'🎈', p:['🎈','🎁','🎉','🥳'],      s:'Mes de los cumpleaños y del niño'},
+    {n:'Septiembre',bg:['#56ab2f','#a8e063'],e:'🌸', p:['🌸','🌼','🦋','🌷'],     s:'Llegó la primavera'},
+    {n:'Octubre', bg:['#ff8c00','#4a235a'], e:'🍁', p:['🍁','🍂','🎃','🥧'],      s:'Un mes lleno de color'},
+    {n:'Noviembre',bg:['#11998e','#38ef7d'],e:'🌿', p:['🌿','🌻','☀️','🍞'],      s:'Ya se siente el verano'},
+    {n:'Diciembre',bg:['#b31217','#0f5132'],e:'🎄', p:['🎄','⭐','🎁','❄️'],      s:'Tiempo de brindar y compartir'}
+  ];
+  // Fechas especiales "mes-día" (tienen prioridad sobre el tema del mes). Rangos: desde-hasta en el mismo mes.
+  var ESPECIALES = [
+    {m:1,  d1:1,  d2:1,  hola:'¡Feliz', t:'Año Nuevo!',           bg:['#141e30','#c9a227'], e:'🎆', p:['🎆','🥂','✨','🎇'], s:'Que sea un gran año'},
+    {m:3,  d1:1,  d2:1,  hola:'Hoy es el', t:'Día de los Héroes', bg:['#c0392b','#2c5fb3'], e:'🇵🇾', p:['🇵🇾','⭐'], s:'Con orgullo paraguayo'},
+    {m:5,  d1:1,  d2:1,  hola:'¡Feliz', t:'Día del Trabajador!',  bg:['#2c5fb3','#c0392b'], e:'👷', p:['🛠️','⭐','🥖'], s:'Gracias por tu esfuerzo'},
+    {m:5,  d1:14, d2:15, hola:'¡Viva la', t:'Independencia!',     bg:['#c0392b','#2c5fb3'], e:'🇵🇾', p:['🇵🇾','⭐','🎉'], s:'Paraguay, 14 y 15 de mayo'},
+    {m:6,  d1:12, d2:12, hola:'Hoy es el', t:'Día de la Paz del Chaco', bg:['#2c5fb3','#c0392b'], e:'🕊️', p:['🕊️','🇵🇾'], s:'Paz y memoria'},
+    {m:8,  d1:15, d2:15, hola:'¡Feliz', t:'Cumple Asunción!',     bg:['#f7b955','#2c5fb3'], e:'🏙️', p:['🎉','🇵🇾','🎈'], s:'Fundación de Asunción'},
+    {m:8,  d1:16, d2:16, hola:'¡Feliz', t:'Día del Niño!',        bg:['#ff6ec4','#7873f5'], e:'🎈', p:['🎈','🧸','🎂','🍭'], s:'A disfrutar con los más chicos'},
+    {m:10, d1:31, d2:31, hola:'¡Feliz', t:'Halloween!',           bg:['#2b1055','#ff7a00'], e:'🎃', p:['🎃','👻','🦇','🍬'], s:'Dulce o truco'},
+    {m:11, d1:2,  d2:2,  hola:'Hoy es el', t:'Día de los Difuntos', bg:['#4a3b5c','#9a7aa0'], e:'🕯️', p:['🕯️','🌼','🕊️'], s:'Recordamos con cariño'},
+    {m:12, d1:8,  d2:8,  hola:'Hoy es el', t:'Día de la Virgen de Caacupé', bg:['#2c5fb3','#7fb2e5'], e:'🙏', p:['🙏','⭐','🌹'], s:'Con fe y gratitud'},
+    {m:12, d1:24, d2:25, hola:'¡Feliz', t:'Navidad!',             bg:['#b31217','#0f5132'], e:'🎅', p:['🎄','🎁','⭐','❄️'], s:'Que la pasen en familia'},
+    {m:12, d1:31, d2:31, hola:'¡Feliz', t:'Año Nuevo!',           bg:['#141e30','#c9a227'], e:'🎆', p:['🎆','🥂','✨','🎇'], s:'Gracias por este año'}
+  ];
+  var hoy = new Date(), m = hoy.getMonth()+1, d = hoy.getDate();
+  var tema = null;
+  for(var i=0;i<ESPECIALES.length;i++){ var x=ESPECIALES[i]; if(x.m===m && d>=x.d1 && d<=x.d2){ tema=x; break; } }
+  if(!tema){ var M=MESES[m-1]; tema={hola:'Hola', t:M.n, bg:M.bg, e:M.e, p:M.p, s:M.s}; }
+  var el = document.getElementById('splashScreen');
+  el.style.background = 'linear-gradient(160deg,'+tema.bg[0]+','+tema.bg[1]+')';
+  var parts = '';
+  for(var k=0;k<22;k++){
+    var emo = tema.p[k % tema.p.length], left = Math.round(Math.random()*96), size = 18+Math.round(Math.random()*22),
+        dur = 5+Math.random()*5, delay = -Math.random()*8;
+    parts += '<span class="sp-part" style="left:'+left+'%;font-size:'+size+'px;animation-duration:'+dur.toFixed(1)+'s;animation-delay:'+delay.toFixed(1)+'s;">'+emo+'</span>';
+  }
+  el.innerHTML = parts +
+    '<div class="sp-emoji-main">'+tema.e+'</div>' +
+    '<div class="sp-hola">'+tema.hola+'</div>' +
+    '<div class="sp-titulo">'+tema.t+'</div>' +
+    '<div class="sp-sub">'+tema.s+'</div>' +
+    '<div class="sp-app">VitaPan · Pedidos</div>';
+  el.addEventListener('click', function(){ if(window.ocultarSplash) window.ocultarSplash(); }); // tocar para saltar
+})();
+</script>
 
 <div id="loginOverlay" class="modal-overlay" style="align-items:center;">
   <div class="modal" style="border-radius:16px; max-width:340px;">
@@ -364,6 +430,7 @@ function ensureDateBucket(fecha){
 }
 
 // ---------- Autenticación ----------
+window.ocultarSplash = ocultarSplash;
 function ocultarSplash(){
   const splash = document.getElementById('splashScreen');
   if(!splash) return;
@@ -371,7 +438,7 @@ function ocultarSplash(){
   setTimeout(()=> splash.remove(), 450);
 }
 // Mínimo 900ms visible (para que no sea un parpadeo) y máximo 4s por si algo tarda en responder.
-const splashMinTime = new Promise(res => setTimeout(res, 900));
+const splashMinTime = new Promise(res => setTimeout(res, 2200));
 const splashMaxTime = new Promise(res => setTimeout(res, 4000));
 let splashListo = false;
 Promise.race([splashMaxTime]).then(()=>{ if(!splashListo){ splashListo=true; ocultarSplash(); } });
@@ -898,7 +965,7 @@ function generarPDF(){
 
   renderizarColumnas(doc, columnas, topY, colWidth, fontSize, cellPadding, margin, gutter);
 
-  doc.save('Pedido_' + currentCat.replace(/\s+/g,'_') + '_' + currentDate + '.pdf');
+  entregarArchivo(doc.output('blob'), 'Pedido_' + currentCat.replace(/\s+/g,'_') + '_' + currentDate + '.pdf', 'application/pdf');
 }
 
 function generarPDFCombinado(cats){
@@ -932,7 +999,7 @@ function generarPDFCombinado(cats){
 
   renderizarColumnas(doc, columnas, topY, colWidth, fontSize, cellPadding, margin, gutter);
 
-  doc.save('Pedido_' + cats.map(c=>c.replace(/\s+/g,'_')).join('_') + '_' + currentDate + '.pdf');
+  entregarArchivo(doc.output('blob'), 'Pedido_' + cats.map(c=>c.replace(/\s+/g,'_')).join('_') + '_' + currentDate + '.pdf', 'application/pdf');
 }
 
 // ---------- Excel ----------
@@ -1004,14 +1071,61 @@ function escribirBloqueCategoriaExcel(ws, cat, bucket, colOffset, filaInicio){
   return fila - filaInicio;
 }
 
+
+// ---------- Entrega del archivo generado: descargar o enviar por correo ----------
+let archivoListo = null;
+function descargarBlob(blob, nombre){
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url; a.download = nombre;
+  document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(()=>URL.revokeObjectURL(url), 4000);
+}
+function entregarArchivo(blob, nombre, mime){
+  archivoListo = { blob, nombre, mime };
+  const root = document.getElementById('modalRoot');
+  const esPDF = nombre.toLowerCase().endsWith('.pdf');
+  let html = '<div class="modal-overlay" id="ovEntrega"><div class="modal">';
+  html += '<h2>' + (esPDF ? 'PDF listo' : 'Excel listo') + '</h2>';
+  html += '<div class="modal-sub">' + nombre + '</div>';
+  html += '<div style="display:flex;gap:8px;margin-top:10px;">';
+  html += '<button class="modal-close" id="btnEntregaDescargar" style="margin-top:0;flex:1;background:var(--ok);">Descargar</button>';
+  html += '<button class="modal-close" id="btnEntregaCorreo" style="margin-top:0;flex:1;">Enviar por correo</button>';
+  html += '</div>';
+  html += '<button class="modal-close" id="btnEntregaCerrar" style="background:#8a7a63;">Cerrar</button>';
+  html += '<div class="modal-sub" style="margin-top:10px;">"Enviar por correo" abre tus apps (Gmail, Outlook, etc.) con el archivo ya adjunto.</div>';
+  html += '</div></div>';
+  root.innerHTML = html;
+  document.getElementById('ovEntrega').addEventListener('click', (e)=>{ if(e.target.id === 'ovEntrega') root.innerHTML = ''; });
+  document.getElementById('btnEntregaCerrar').onclick = ()=>{ root.innerHTML = ''; };
+  document.getElementById('btnEntregaDescargar').onclick = ()=>{ descargarBlob(blob, nombre); };
+  document.getElementById('btnEntregaCorreo').onclick = enviarArchivoPorCorreo;
+}
+async function enviarArchivoPorCorreo(){
+  const { blob, nombre, mime } = archivoListo;
+  const email = currentUser ? currentUser.email : '';
+  const sucursal = SUCURSAL_POR_USUARIO[email] || email || '';
+  const asunto = 'Pedido ' + AREAS[currentArea].label + ' - ' + currentDate + (sucursal ? ' - ' + sucursal : '');
+  const cuerpo = 'Adjunto el pedido de ' + AREAS[currentArea].label + ' del ' + currentDate + (sucursal ? ' (' + sucursal + ')' : '') + '.\n\nVitaPan';
+  const file = new File([blob], nombre, { type: mime });
+  try{
+    if(navigator.canShare && navigator.canShare({ files: [file] })){
+      await navigator.share({ files: [file], title: asunto, text: cuerpo });
+      return;
+    }
+  }catch(e){
+    if(e && e.name === 'AbortError') return; // el usuario cerró el menú
+  }
+  // Respaldo (PC o navegador sin compartir archivos): descarga el archivo y abre el correo para adjuntarlo a mano.
+  descargarBlob(blob, nombre);
+  alert('Tu navegador no permite adjuntar automáticamente. Se descargó el archivo; se abrirá el correo para que lo adjuntes.');
+  window.location.href = 'mailto:?subject=' + encodeURIComponent(asunto) + '&body=' + encodeURIComponent(cuerpo);
+}
+
 async function descargarWorkbook(workbook, nombreArchivo){
   const buffer = await workbook.xlsx.writeBuffer();
   const blob = new Blob([buffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement('a');
-  a.href = url; a.download = nombreArchivo;
-  document.body.appendChild(a); a.click(); a.remove();
-  URL.revokeObjectURL(url);
+  entregarArchivo(blob, nombreArchivo, 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
 }
 
 async function generarExcel(cat){
