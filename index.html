@@ -849,6 +849,72 @@ function medirAlturaCuerpo(doc, body, fontSize, cellPadding, colWidth){
   return total * 1.05;
 }
 
+
+// Reparte "unidades" (secciones completas) con distinto peso en n columnas, buscando que todas
+// queden del mismo alto. Primero prueba mantener el orden original; solo si reordenar mejora el
+// reparto de forma notable, rellena los huecos moviendo secciones a otra columna.
+// Devuelve una lista de columnas; cada columna es una lista de índices de unidades en su orden original.
+function empaquetarPesos(pesos, n){
+  const m = pesos.length;
+  n = Math.max(1, Math.min(n, m));
+  const w = pesos.map(p => Math.max(1, Math.round(p)));
+  const altoMax = grupos => Math.max(...grupos.map(g => g.reduce((a,i)=>a+w[i], 0)));
+
+  const contiguo = particionOptimaPorPeso(w, n);
+  const maxContiguo = altoMax(contiguo);
+
+  // Reparto libre: primero las secciones más grandes, siempre en la columna más vacía...
+  const cols = Array.from({length:n}, ()=>[]);
+  const carga = new Array(n).fill(0);
+  w.map((p,i)=>i).sort((a,b)=>w[b]-w[a]).forEach(i=>{
+    let k = 0;
+    for(let c=1;c<n;c++) if(carga[c] < carga[k]) k = c;
+    cols[k].push(i); carga[k] += w[i];
+  });
+  // ...y después se mejora moviendo o intercambiando secciones con la columna más cargada.
+  for(let vuelta=0; vuelta<300; vuelta++){
+    let a = 0;
+    for(let c=1;c<n;c++) if(carga[c] > carga[a]) a = c;
+    let mejor = null, mejorMax = carga[a];
+    for(let b=0;b<n;b++){
+      if(b === a) continue;
+      cols[a].forEach(i=>{
+        const nm = Math.max(carga[a]-w[i], carga[b]+w[i]);
+        if(nm < mejorMax){ mejorMax = nm; mejor = { tipo:'mover', a, b, i }; }
+        cols[b].forEach(j=>{
+          const d = w[i]-w[j];
+          if(d <= 0) return;
+          const nm2 = Math.max(carga[a]-d, carga[b]+d);
+          if(nm2 < mejorMax){ mejorMax = nm2; mejor = { tipo:'cambiar', a, b, i, j }; }
+        });
+      });
+    }
+    if(!mejor) break;
+    if(mejor.tipo === 'mover'){
+      cols[mejor.a] = cols[mejor.a].filter(x=>x!==mejor.i); cols[mejor.b].push(mejor.i);
+      carga[mejor.a] -= w[mejor.i]; carga[mejor.b] += w[mejor.i];
+    } else {
+      const d = w[mejor.i]-w[mejor.j];
+      cols[mejor.a] = cols[mejor.a].filter(x=>x!==mejor.i).concat([mejor.j]);
+      cols[mejor.b] = cols[mejor.b].filter(x=>x!==mejor.j).concat([mejor.i]);
+      carga[mejor.a] -= d; carga[mejor.b] += d;
+    }
+  }
+  const libre = cols.filter(c=>c.length).map(c=>c.slice().sort((x,y)=>x-y)).sort((x,y)=>x[0]-y[0]);
+  const maxLibre = altoMax(libre);
+
+  // Si mantener el orden ya queda casi igual de parejo, se respeta el orden original.
+  return (maxContiguo <= maxLibre * 1.04) ? contiguo : libre;
+}
+
+// Igual que antes pero para el PDF: las unidades son las secciones del cuerpo de la tabla.
+function empaquetarUnidadesPDF(doc, body, boundaries, colWidth, n){
+  const unidades = boundaries.map((b,i)=> body.slice(b, i+1 < boundaries.length ? boundaries[i+1] : body.length));
+  const pesos = unidades.map(u => medirAlturaCuerpo(doc, u, 6.5, 1.3, colWidth));
+  const grupos = empaquetarPesos(pesos, n);
+  return grupos.map(g => [].concat(...g.map(i => unidades[i])));
+}
+
 // Elige los n-1 puntos de corte (siempre al inicio de una sección) que mejor reparten el alto
 // estimado entre las n columnas de la hoja.
 function elegirCortesMultiples(doc, body, boundaries, colWidth, n){
@@ -910,8 +976,12 @@ function elegirNumeroColumnas(doc, body, boundaries, maxColumnas, pageW, pageH, 
   let mejor = null;
   for(let n=1; n<=maxColumnas; n++){
     const colWidth = (pageW - margin*2 - gutter*(n-1)) / n;
-    const cortes = elegirCortesMultiples(doc, body, boundaries, colWidth, n);
-    const columnas = partirEnColumnas(body, cortes);
+    let columnas;
+    if(n > 1 && boundaries.length >= n){
+      columnas = empaquetarUnidadesPDF(doc, body, boundaries, colWidth, n);
+    } else {
+      columnas = partirEnColumnas(body, elegirCortesMultiples(doc, body, boundaries, colWidth, n));
+    }
     const alturaDisponible = pageH - topY - margin;
     const { fontSize, cellPadding } = ajustarFuenteN(doc, columnas, colWidth, alturaDisponible);
     mejor = { n, columnas, colWidth, fontSize, cellPadding };
@@ -1066,64 +1136,77 @@ const COLOR_BORDE = 'FFB4B4B4';
 
 const bordeFino = { top:{style:'thin', color:{argb:COLOR_BORDE}}, left:{style:'thin', color:{argb:COLOR_BORDE}}, bottom:{style:'thin', color:{argb:COLOR_BORDE}}, right:{style:'thin', color:{argb:COLOR_BORDE}} };
 
-// Escribe el bloque de una categoría (encabezado + secciones + productos) a partir de la columna
-// colOffset (1 = A), y devuelve cuántas filas ocupó y el ancho de nombre más largo que encontró.
-function escribirBloqueCategoriaExcel(ws, cat, bucket, colOffset, filaInicio){
+function escribirEncabezadoExcel(ws, colOffset, fila){
+  ['Producto','S','P'].forEach((txt,i)=>{
+    const c = ws.getCell(fila, colOffset+i);
+    c.value = txt;
+    c.font = { bold:true, color:{argb:'FFFFFFFF'} };
+    c.fill = { type:'pattern', pattern:'solid', fgColor:{argb:COLOR_HEADER} };
+    c.border = bordeFino;
+    c.alignment = { horizontal: i===0 ? 'left' : 'center' };
+  });
+}
+
+// Escribe una sección (título + productos) y devuelve cuántas filas ocupó y el nombre más largo.
+function escribirSeccionExcel(ws, cat, section, bucket, colOffset, filaInicio){
   let fila = filaInicio;
   let anchoMax = 10;
 
-  const headCells = [ws.getCell(fila, colOffset), ws.getCell(fila, colOffset+1), ws.getCell(fila, colOffset+2)];
-  ['Producto','S','P'].forEach((txt,i)=>{
-    headCells[i].value = txt;
-    headCells[i].font = { bold:true, color:{argb:'FFFFFFFF'} };
-    headCells[i].fill = { type:'pattern', pattern:'solid', fgColor:{argb:COLOR_HEADER} };
-    headCells[i].border = bordeFino;
-    headCells[i].alignment = { horizontal: i===0 ? 'left' : 'center' };
-  });
+  ws.mergeCells(fila, colOffset, fila, colOffset+2);
+  const c = ws.getCell(fila, colOffset);
+  c.value = section.title;
+  c.font = { bold:true };
+  c.fill = { type:'pattern', pattern:'solid', fgColor:{argb:COLOR_SECCION} };
+  for(let cc=colOffset; cc<=colOffset+2; cc++) ws.getCell(fila, cc).border = bordeFino;
+  if(section.title.length > anchoMax) anchoMax = section.title.length;
   fila++;
 
-  catalogoActual()[cat].forEach(section=>{
-    ws.mergeCells(fila, colOffset, fila, colOffset+2);
-    const c = ws.getCell(fila, colOffset);
-    c.value = section.title;
-    c.font = { bold:true };
-    c.fill = { type:'pattern', pattern:'solid', fgColor:{argb:COLOR_SECCION} };
-    for(let cc=colOffset; cc<=colOffset+2; cc++) ws.getCell(fila, cc).border = bordeFino;
-    if(section.title.length > anchoMax) anchoMax = section.title.length;
-    fila++;
-
-    section.items.forEach(item=>{
-      if(item.type === 'day'){
-        ws.mergeCells(fila, colOffset, fila, colOffset+2);
-        const dc = ws.getCell(fila, colOffset);
-        dc.value = item.label;
-        dc.font = { italic:true, color:{argb:'FF5F5F5F'} };
-        dc.fill = { type:'pattern', pattern:'solid', fgColor:{argb:COLOR_DIA} };
-        for(let cc=colOffset; cc<=colOffset+2; cc++) ws.getCell(fila, cc).border = bordeFino;
-        fila++;
-      } else {
-        const existente = bucket[cat] && bucket[cat][item.id];
-        const stockPrevio = lastStock[currentArea] && lastStock[currentArea][item.id];
-        const e = existente || { s: (stockPrevio ? stockPrevio.s : ''), p: '' };
-        const nombreCell = ws.getCell(fila, colOffset);
-        const sCell = ws.getCell(fila, colOffset+1);
-        const pCell = ws.getCell(fila, colOffset+2);
-        nombreCell.value = item.name;
-        sCell.value = e.s !== '' ? Number(e.s) : null;
-        pCell.value = e.p !== '' ? Number(e.p) : null;
-        sCell.alignment = { horizontal:'center' };
-        pCell.alignment = { horizontal:'center' };
-        [nombreCell, sCell, pCell].forEach(c=> c.border = bordeFino);
-        if(item.name.length > anchoMax) anchoMax = item.name.length;
-        fila++;
-      }
-    });
+  section.items.forEach(item=>{
+    if(item.type === 'day'){
+      ws.mergeCells(fila, colOffset, fila, colOffset+2);
+      const dc = ws.getCell(fila, colOffset);
+      dc.value = item.label;
+      dc.font = { italic:true, color:{argb:'FF5F5F5F'} };
+      dc.fill = { type:'pattern', pattern:'solid', fgColor:{argb:COLOR_DIA} };
+      for(let cc=colOffset; cc<=colOffset+2; cc++) ws.getCell(fila, cc).border = bordeFino;
+      fila++;
+    } else {
+      const existente = bucket[cat] && bucket[cat][item.id];
+      const stockPrevio = lastStock[currentArea] && lastStock[currentArea][item.id];
+      const e = existente || { s: (stockPrevio ? stockPrevio.s : ''), p: '' };
+      const nombreCell = ws.getCell(fila, colOffset);
+      const sCell = ws.getCell(fila, colOffset+1);
+      const pCell = ws.getCell(fila, colOffset+2);
+      nombreCell.value = item.name;
+      sCell.value = e.s !== '' ? Number(e.s) : null;
+      pCell.value = e.p !== '' ? Number(e.p) : null;
+      sCell.alignment = { horizontal:'center' };
+      pCell.alignment = { horizontal:'center' };
+      [nombreCell, sCell, pCell].forEach(cl=> cl.border = bordeFino);
+      if(item.name.length > anchoMax) anchoMax = item.name.length;
+      fila++;
+    }
   });
+  return { filas: fila - filaInicio, anchoMax };
+}
 
+function ajustarAnchosExcel(ws, colOffset, anchoMax){
   ws.getColumn(colOffset).width = Math.min(anchoMax + 2, 45);
   ws.getColumn(colOffset+1).width = 7;
   ws.getColumn(colOffset+2).width = 7;
+}
 
+// Bloque de una categoría completa (encabezado + todas sus secciones) para el Excel de una sola pestaña.
+function escribirBloqueCategoriaExcel(ws, cat, bucket, colOffset, filaInicio){
+  let fila = filaInicio, anchoMax = 10;
+  escribirEncabezadoExcel(ws, colOffset, fila);
+  fila++;
+  catalogoActual()[cat].forEach(section=>{
+    const r = escribirSeccionExcel(ws, cat, section, bucket, colOffset, fila);
+    fila += r.filas;
+    if(r.anchoMax > anchoMax) anchoMax = r.anchoMax;
+  });
+  ajustarAnchosExcel(ws, colOffset, anchoMax);
   return fila - filaInicio;
 }
 
@@ -1234,14 +1317,6 @@ function particionOptimaPorPeso(pesos, n){
   return grupos;
 }
 
-// Agrupa las categorías en n columnas (cada columna es una lista de categorías completas que
-// van una debajo de la otra), con el reparto más parejo posible por cantidad de filas.
-function repartirCategoriasEnColumnas(cats, n){
-  const filasPorCategoria = cats.map(cat => 2 + catalogoActual()[cat][0].items.filter(it=>it.type==='product').length);
-  const grupos = particionOptimaPorPeso(filasPorCategoria, n);
-  return grupos.map(indices => indices.map(i => cats[i]));
-}
-
 async function generarExcelCombinado(cats){
   if(!window.ExcelJS){
     alert('No se pudo cargar el generador de Excel. Verificá tu conexión a internet e intentá de nuevo.');
@@ -1251,17 +1326,25 @@ async function generarExcelCombinado(cats){
   const workbook = new ExcelJS.Workbook();
   const ws = workbook.addWorksheet('Pedido combinado'.slice(0,31));
 
-  // Igual que en el PDF: las categorías fluyen en columnas, y si una no llena su columna,
-  // la siguiente sigue completando debajo de ella en la misma columna.
-  const n = Math.min(3, cats.length);
-  const columnas = repartirCategoriasEnColumnas(cats, n);
+  // Se reparten las SECCIONES (no las categorías enteras) en 3 columnas del mismo alto: si una
+  // sección es corta, el hueco de abajo se completa con otra sección que entre.
+  const unidades = [];
+  cats.forEach(cat=> catalogoActual()[cat].forEach(section=> unidades.push({ cat, section, peso: 1 + section.items.length })));
+  const n = Math.min(3, unidades.length);
+  const columnas = empaquetarPesos(unidades.map(u=>u.peso), n);
 
-  columnas.forEach((catsEnColumna, colIdx)=>{
+  columnas.forEach((indices, colIdx)=>{
     const colOffset = 1 + colIdx*3;
-    let fila = 1;
-    catsEnColumna.forEach(cat=>{
-      fila += escribirBloqueCategoriaExcel(ws, cat, bucket, colOffset, fila);
+    let fila = 1, anchoMax = 10;
+    escribirEncabezadoExcel(ws, colOffset, fila);
+    fila++;
+    indices.forEach(ix=>{
+      const u = unidades[ix];
+      const r = escribirSeccionExcel(ws, u.cat, u.section, bucket, colOffset, fila);
+      fila += r.filas;
+      if(r.anchoMax > anchoMax) anchoMax = r.anchoMax;
     });
+    ajustarAnchosExcel(ws, colOffset, anchoMax);
   });
 
   await descargarWorkbook(workbook, 'Pedido_' + cats.map(c=>c.replace(/\s+/g,'_')).join('_') + '_' + currentDate + '.xlsx');
