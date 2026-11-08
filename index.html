@@ -917,7 +917,7 @@ function empaquetarUnidadesPDF(doc, body, boundaries, colWidth, n){
 
 // SOLO para hoja horizontal: como las columnas son más angostas y más numerosas, una sección grande
 // (ej. Gaseosas) puede dejar una columna mucho más alta que las otras. Acá las secciones muy largas
-// se pueden cortar entre productos (la continuación repite el título con "(cont.)") para que todas
+// se pueden cortar entre productos (la continuación repite el mismo título) para que todas
 // las columnas terminen a la misma altura. Si dos trozos caen en la misma columna se vuelven a unir.
 function empaquetarUnidadesPDFHorizontal(doc, body, boundaries, colWidth, n){
   const alto = rows => medirAlturaCuerpo(doc, rows, 6.5, 1.3, colWidth);
@@ -926,7 +926,7 @@ function empaquetarUnidadesPDFHorizontal(doc, body, boundaries, colWidth, n){
   boundaries.forEach((b, u)=>{
     const rows = body.slice(b, u+1 < boundaries.length ? boundaries[u+1] : body.length);
     const titulo = rows[0];
-    const cont = [{ content: String(titulo[0].content) + ' (cont.)', colSpan: 3, styles: titulo[0].styles }];
+    const cont = [[{ content: String(titulo[0].content), colSpan: 3, styles: Object.assign({}, titulo[0].styles) }]];
     const hs = rows.map(r => alto([r]));
     const esDia = r => r.length === 1;
     const partes = [];
@@ -1017,7 +1017,7 @@ function elegirNumeroColumnas(doc, body, boundaries, maxColumnas, pageW, pageH, 
   for(let n=1; n<=maxColumnas; n++){
     const colWidth = (pageW - margin*2 - gutter*(n-1)) / n;
     let columnas;
-    if(n > 1 && boundaries.length >= n && pageW > pageH){
+    if(n > 1 && pageW > pageH){
       columnas = empaquetarUnidadesPDFHorizontal(doc, body, boundaries, colWidth, n);
     } else if(n > 1 && boundaries.length >= n){
       columnas = empaquetarUnidadesPDF(doc, body, boundaries, colWidth, n);
