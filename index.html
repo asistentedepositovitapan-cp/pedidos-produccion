@@ -915,6 +915,46 @@ function empaquetarUnidadesPDF(doc, body, boundaries, colWidth, n){
   return grupos.map(g => [].concat(...g.map(i => unidades[i])));
 }
 
+// SOLO para hoja horizontal: como las columnas son más angostas y más numerosas, una sección grande
+// (ej. Gaseosas) puede dejar una columna mucho más alta que las otras. Acá las secciones muy largas
+// se pueden cortar entre productos (la continuación repite el título con "(cont.)") para que todas
+// las columnas terminen a la misma altura. Si dos trozos caen en la misma columna se vuelven a unir.
+function empaquetarUnidadesPDFHorizontal(doc, body, boundaries, colWidth, n){
+  const alto = rows => medirAlturaCuerpo(doc, rows, 6.5, 1.3, colWidth);
+  const C = alto(body) / n * 0.15;
+  const trozos = [];
+  boundaries.forEach((b, u)=>{
+    const rows = body.slice(b, u+1 < boundaries.length ? boundaries[u+1] : body.length);
+    const titulo = rows[0];
+    const cont = [{ content: String(titulo[0].content) + ' (cont.)', colSpan: 3, styles: titulo[0].styles }];
+    const hs = rows.map(r => alto([r]));
+    const esDia = r => r.length === 1;
+    const partes = [];
+    let inicio = 1, acc = 0;
+    for(let i=1; i<rows.length-1; i++){
+      acc += hs[i];
+      const resto = rows.slice(i+1);
+      if(acc >= C && !esDia(rows[i]) && resto.some(r => !esDia(r))){
+        partes.push(rows.slice(inicio, i+1)); inicio = i+1; acc = 0;
+      }
+    }
+    partes.push(rows.slice(inicio));
+    partes.forEach((pr, k)=> trozos.push({ u, k, rows: (k === 0 ? [titulo] : cont).concat(pr) }));
+  });
+  const pesos = trozos.map(t => Math.max(1, Math.round(alto(t.rows))));
+  const grupos = particionOptimaPorPeso(pesos, n);
+  return grupos.map(indices=>{
+    const out = []; let prev = null;
+    indices.forEach(ix=>{
+      const t = trozos[ix];
+      const rows = (prev && prev.u === t.u && t.k === prev.k + 1) ? t.rows.slice(1) : t.rows;
+      rows.forEach(r => out.push(r));
+      prev = t;
+    });
+    return out;
+  });
+}
+
 // Elige los n-1 puntos de corte (siempre al inicio de una sección) que mejor reparten el alto
 // estimado entre las n columnas de la hoja.
 function elegirCortesMultiples(doc, body, boundaries, colWidth, n){
@@ -977,7 +1017,9 @@ function elegirNumeroColumnas(doc, body, boundaries, maxColumnas, pageW, pageH, 
   for(let n=1; n<=maxColumnas; n++){
     const colWidth = (pageW - margin*2 - gutter*(n-1)) / n;
     let columnas;
-    if(n > 1 && boundaries.length >= n){
+    if(n > 1 && boundaries.length >= n && pageW > pageH){
+      columnas = empaquetarUnidadesPDFHorizontal(doc, body, boundaries, colWidth, n);
+    } else if(n > 1 && boundaries.length >= n){
       columnas = empaquetarUnidadesPDF(doc, body, boundaries, colWidth, n);
     } else {
       columnas = partirEnColumnas(body, elegirCortesMultiples(doc, body, boundaries, colWidth, n));
