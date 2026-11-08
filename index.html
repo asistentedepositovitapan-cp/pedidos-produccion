@@ -746,11 +746,67 @@ function renderResumen(){
     html += '<p style="font-size:.85rem;color:#a4917a;">Todavía no cargaste ningún pedido para esta fecha.</p>';
   }
 
-  html += '<button class="modal-close" id="closeResumen">Cerrar</button>';
+  if(totalItems > 0){
+    html += '<button class="modal-close" id="pdfResumen" style="background:var(--acento);">PDF / Compartir (WhatsApp, correo…)</button>';
+  }
+  html += '<button class="modal-close" id="closeResumen" style="margin-top:8px;">Cerrar</button>';
   html += '</div></div>';
   root.innerHTML = html;
   document.getElementById('closeResumen').onclick = ()=>{ root.innerHTML = ''; };
+  const bPdf = document.getElementById('pdfResumen');
+  if(bPdf) bPdf.onclick = ()=>{ root.innerHTML = ''; generarPDFResumen(); };
   document.getElementById('ovResumen').addEventListener('click', (e)=>{ if(e.target.id === 'ovResumen') root.innerHTML=''; });
+}
+
+// PDF del resumen: misma presentación que se ve en pantalla (categoría, producto a la izquierda, cantidad a la derecha).
+function generarPDFResumen(){
+  if(!window.jspdf){ alert('No se pudo cargar el generador de PDF. Revisá tu conexión e intentá de nuevo.'); return; }
+  const bucket = ensureDateBucket(currentDate);
+  const { jsPDF } = window.jspdf;
+  const doc = new jsPDF({ unit:'pt', format:'a4', orientation:'portrait' });
+  const pageW = doc.internal.pageSize.getWidth(), pageH = doc.internal.pageSize.getHeight();
+  const margin = 40, anchoCol = pageW - margin*2;
+  const email = currentUser ? currentUser.email : '';
+  const sucursal = SUCURSAL_POR_USUARIO[email] || email || '';
+  const MARRON = [95,60,31], NARANJA = [199,107,63], GRIS = [138,122,99], LINEA = [226,211,186];
+
+  let y = margin;
+  function encabezado(){
+    doc.setFont('helvetica','bold'); doc.setFontSize(16); doc.setTextColor(...MARRON);
+    doc.text('Resumen del pedido', margin, y + 12);
+    doc.setFont('helvetica','normal'); doc.setFontSize(9); doc.setTextColor(...GRIS);
+    doc.text('VitaPan', pageW - margin, y + 10, { align:'right' });
+    if(sucursal) doc.text(sucursal, pageW - margin, y + 22, { align:'right' });
+    y += 30;
+    doc.text('Fecha: ' + currentDate + ' · Área: ' + AREAS[currentArea].label + ' · productos con pedido cargado', margin, y);
+    y += 16;
+  }
+  encabezado();
+
+  const alto = 20;
+  categoriasActuales().forEach(cat=>{
+    const entries = Object.entries(bucket[cat]).filter(([id,e])=> e.p !== '' && Number(e.p) > 0);
+    if(entries.length === 0) return;
+    if(y + 30 + alto > pageH - margin){ doc.addPage(); y = margin; }
+    y += 12;
+    doc.setFont('helvetica','bold'); doc.setFontSize(10); doc.setTextColor(...MARRON);
+    doc.text(cat.toUpperCase(), margin, y);
+    y += 6;
+    entries.forEach(([id, e])=>{
+      if(y + alto > pageH - margin){ doc.addPage(); y = margin; }
+      const nombre = (PRODUCT_BY_ID[id] && PRODUCT_BY_ID[id].name) || id;
+      y += alto;
+      doc.setFont('helvetica','normal'); doc.setFontSize(11); doc.setTextColor(43,33,23);
+      const txt = doc.splitTextToSize(nombre, anchoCol - 60)[0];
+      doc.text(txt, margin, y - 6);
+      doc.setFont('helvetica','bold'); doc.setTextColor(...NARANJA);
+      doc.text(String(e.p), pageW - margin, y - 6, { align:'right' });
+      doc.setDrawColor(...LINEA); doc.setLineWidth(0.6);
+      doc.line(margin, y, pageW - margin, y);
+    });
+  });
+
+  entregarArchivo(doc.output('blob'), 'Resumen_' + AREAS[currentArea].label + '_' + currentDate + '.pdf', 'application/pdf');
 }
 
 // ---------- PDF ----------
@@ -1090,10 +1146,10 @@ function entregarArchivo(blob, nombre, mime){
   html += '<div class="modal-sub">' + nombre + '</div>';
   html += '<div style="display:flex;gap:8px;margin-top:10px;">';
   html += '<button class="modal-close" id="btnEntregaDescargar" style="margin-top:0;flex:1;background:var(--ok);">Descargar</button>';
-  html += '<button class="modal-close" id="btnEntregaCorreo" style="margin-top:0;flex:1;">Enviar por correo</button>';
+  html += '<button class="modal-close" id="btnEntregaCorreo" style="margin-top:0;flex:1;">Compartir / Enviar</button>';
   html += '</div>';
   html += '<button class="modal-close" id="btnEntregaCerrar" style="background:#8a7a63;">Cerrar</button>';
-  html += '<div class="modal-sub" style="margin-top:10px;">"Enviar por correo" abre tus apps (Gmail, Outlook, etc.) con el archivo ya adjunto.</div>';
+  html += '<div class="modal-sub" style="margin-top:10px;">"Compartir / Enviar" abre tus apps (WhatsApp, Gmail, etc.) con el archivo ya adjunto.</div>';
   html += '</div></div>';
   root.innerHTML = html;
   document.getElementById('ovEntrega').addEventListener('click', (e)=>{ if(e.target.id === 'ovEntrega') root.innerHTML = ''; });
