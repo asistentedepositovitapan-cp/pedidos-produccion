@@ -1,4 +1,4 @@
-const CACHE_NAME = 'pedidos-produccion-v22';
+const CACHE_NAME = 'pedidos-produccion-v24';
 const ARCHIVOS_CACHE = [
   './',
   './index.html',
