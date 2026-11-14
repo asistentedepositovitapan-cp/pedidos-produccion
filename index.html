@@ -336,6 +336,7 @@
   </div>
   <div class="date-row" style="margin-top:6px;">
     <span id="userBadge" style="font-size:.72rem;opacity:.85;flex:1;"></span>
+    <button id="btnAgregarItem" style="display:none;border:none;background:var(--masa);color:var(--corteza-dark);border-radius:8px;padding:5px 10px;font-size:.7rem;font-weight:700;cursor:pointer;">+ Agregar ítem</button>
     <button id="btnLogout" style="border:none;background:rgba(255,255,255,0.18);color:#fff;border-radius:8px;padding:5px 10px;font-size:.7rem;cursor:pointer;">Salir</button>
   </div>
 </header>
@@ -453,9 +454,12 @@ auth.onAuthStateChanged(user=>{
     currentUser = user;
     document.getElementById('loginOverlay').classList.add('hidden');
     document.getElementById('userBadge').textContent = user.email;
+    actualizarBotonAdmin();
     iniciarApp();
   } else {
     currentUser = null;
+    actualizarBotonAdmin();
+    if(unsubCatalogoExtra){ unsubCatalogoExtra(); unsubCatalogoExtra = null; }
     document.getElementById('loginOverlay').classList.remove('hidden');
   }
   if(!splashListo){
@@ -535,6 +539,7 @@ async function iniciarApp(){
   document.getElementById('statusPill').textContent = 'cargando…';
   await Promise.all(Object.keys(AREAS).map(area => cargarStockActualInicial(area)));
   Object.keys(AREAS).forEach(area => suscribirseAStockActual(area));
+  await suscribirseACatalogoExtra();
   renderAreaSelector();
   renderTabs();
   document.getElementById('fecha').value = currentDate;
@@ -542,6 +547,213 @@ async function iniciarApp(){
   suscribirseAFecha(currentDate);
   renderContent();
   document.getElementById('statusPill').textContent = 'sincronizado';
+}
+
+
+// ---------- Ítems agregados desde la app (solo administrador) ----------
+// Quién puede agregar ítems. Para sumar otro administrador, agregar su correo a esta lista
+// (y también en las reglas de Firestore, ver firestore.rules).
+const ADMIN_EMAILS = ['gralsantos@vitapan.com'];
+const COLECCION_EXTRA = 'catalogo_extra';
+const EXTRA_DOCS = {};          // id -> datos del ítem agregado
+let unsubCatalogoExtra = null;
+const comparadorNombres = new Intl.Collator('es', { sensitivity:'base', numeric:true });
+
+function esAdmin(){
+  return !!(currentUser && currentUser.email && ADMIN_EMAILS.includes(currentUser.email.toLowerCase()));
+}
+function actualizarBotonAdmin(){
+  const b = document.getElementById('btnAgregarItem');
+  if(b){ b.style.display = esAdmin() ? '' : 'none'; b.onclick = abrirAgregarItem; }
+}
+
+// Regla de ubicación: si la sección ya está en orden alfabético, el ítem nuevo entra en su lugar alfabético;
+// si no lo está (o tiene separadores de día), va al final de la sección.
+function seccionEstaOrdenada(section){
+  if(section.items.some(i => i.type === 'day')) return false;
+  const base = section.items.filter(i => i.type === 'product' && !i.extra);
+  for(let k=1; k<base.length; k++){
+    if(comparadorNombres.compare(base[k-1].name, base[k].name) > 0) return false;
+  }
+  return true;
+}
+function insertarItemEnSeccion(section, item){
+  if(seccionEstaOrdenada(section)){
+    const idx = section.items.findIndex(i => i.type === 'product' && comparadorNombres.compare(i.name, item.name) > 0);
+    if(idx === -1) section.items.push(item); else section.items.splice(idx, 0, item);
+  } else {
+    section.items.push(item);
+  }
+}
+function buscarSeccion(area, cat, titulo){
+  const secs = AREAS[area] && AREAS[area].catalog[cat];
+  if(!secs) return null;
+  return secs.find(s => s.title === titulo) || (secs.length === 1 ? secs[0] : null);
+}
+
+// Reconstruye el catálogo: quita lo agregado antes y lo vuelve a colocar según lo que hay en la base.
+function aplicarCatalogoExtra(){
+  Object.values(AREAS).forEach(a => Object.values(a.catalog).forEach(secs => secs.forEach(s => {
+    s.items = s.items.filter(i => !i.extra);
+  })));
+  Object.keys(PRODUCT_BY_ID).forEach(id => { if(PRODUCT_BY_ID[id].extra) delete PRODUCT_BY_ID[id]; });
+  Object.values(EXTRA_DOCS).sort((a,b)=>(a.ts||0)-(b.ts||0)).forEach(d=>{
+    const sec = buscarSeccion(d.area, d.cat, d.seccion);
+    if(!sec) return;
+    insertarItemEnSeccion(sec, { type:'product', id:d.id, name:d.name, extra:true });
+    PRODUCT_BY_ID[d.id] = { name:d.name, cat:d.cat, extra:true };
+  });
+}
+
+// Vuelve a dibujar la pantalla, pero sin interrumpir si alguien está escribiendo en ese momento.
+function redibujarSeguro(){
+  const a = document.activeElement;
+  if(a && (a.tagName === 'INPUT' || a.tagName === 'TEXTAREA') && a.id !== 'buscador'){
+    setTimeout(redibujarSeguro, 1500);
+    return;
+  }
+  renderTabs();
+  renderContent();
+}
+
+function suscribirseACatalogoExtra(){
+  if(unsubCatalogoExtra){ unsubCatalogoExtra(); unsubCatalogoExtra = null; }
+  return new Promise(resolve=>{
+    let primera = true;
+    unsubCatalogoExtra = db.collection(COLECCION_EXTRA).onSnapshot(snap=>{
+      snap.docChanges().forEach(ch=>{
+        if(ch.type === 'removed') delete EXTRA_DOCS[ch.doc.id];
+        else EXTRA_DOCS[ch.doc.id] = Object.assign({ id: ch.doc.id }, ch.doc.data());
+      });
+      aplicarCatalogoExtra();
+      if(primera){ primera = false; resolve(); }
+      else {
+        redibujarSeguro();
+        if(document.getElementById('ovAgregar')) pintarListaAgregados();
+      }
+    }, err=>{
+      console.warn('No se pudo leer ' + COLECCION_EXTRA, err);
+      if(primera){ primera = false; resolve(); }
+    });
+  });
+}
+
+function abrirAgregarItem(){
+  if(!esAdmin()) return;
+  const root = document.getElementById('modalRoot');
+  const estSel = 'width:100%;padding:9px;border:1px solid #d9c9a8;border-radius:8px;font-size:.9rem;background:#fff;margin-bottom:8px;';
+  root.innerHTML =
+    '<div class="modal-overlay" id="ovAgregar"><div class="modal">' +
+    '<h2>Agregar ítem</h2>' +
+    '<div class="modal-sub">El ítem aparece enseguida para todos los usuarios.</div>' +
+    '<label style="font-size:.75rem;color:#8a7a63;">Sector</label>' +
+    '<select id="agArea" style="' + estSel + '"></select>' +
+    '<label style="font-size:.75rem;color:#8a7a63;">Pestaña (categoría)</label>' +
+    '<select id="agCat" style="' + estSel + '"></select>' +
+    '<div id="agSecBox"><label style="font-size:.75rem;color:#8a7a63;">Sección</label>' +
+    '<select id="agSec" style="' + estSel + '"></select></div>' +
+    '<label style="font-size:.75rem;color:#8a7a63;">Nombre del ítem</label>' +
+    '<input id="agNombre" type="text" maxlength="80" autocomplete="off" style="' + estSel + '" placeholder="Ej: Vaso Antilla c/Tapa">' +
+    '<div class="modal-sub" id="agInfo" style="min-height:1.2em;"></div>' +
+    '<div id="agMsg" style="font-size:.8rem;min-height:1.2em;margin-bottom:6px;"></div>' +
+    '<button class="modal-close" id="agGuardar" style="margin-top:0;">Guardar ítem</button>' +
+    '<div class="cat-h" style="margin-top:14px;">Agregados desde la app</div>' +
+    '<ul id="agLista"></ul>' +
+    '<button class="modal-close" id="agCerrar" style="background:#8a7a63;">Cerrar</button>' +
+    '</div></div>';
+  document.getElementById('ovAgregar').addEventListener('click', e=>{ if(e.target.id === 'ovAgregar') root.innerHTML = ''; });
+  document.getElementById('agCerrar').onclick = ()=>{ root.innerHTML = ''; };
+
+  const selArea = document.getElementById('agArea'), selCat = document.getElementById('agCat'), selSec = document.getElementById('agSec');
+  Object.keys(AREAS).forEach(a=>{
+    const o = document.createElement('option'); o.value = a; o.textContent = AREAS[a].label;
+    if(a === currentArea) o.selected = true;
+    selArea.appendChild(o);
+  });
+  function llenarCats(){
+    selCat.innerHTML = '';
+    Object.keys(AREAS[selArea.value].catalog).forEach(c=>{
+      const o = document.createElement('option'); o.value = c; o.textContent = c;
+      if(selArea.value === currentArea && c === currentCat) o.selected = true;
+      selCat.appendChild(o);
+    });
+    llenarSecs();
+  }
+  function llenarSecs(){
+    const secs = AREAS[selArea.value].catalog[selCat.value];
+    selSec.innerHTML = '';
+    secs.forEach(s=>{ const o = document.createElement('option'); o.value = s.title; o.textContent = s.title; selSec.appendChild(o); });
+    document.getElementById('agSecBox').style.display = secs.length > 1 ? '' : 'none';
+    actualizarInfo();
+  }
+  function actualizarInfo(){
+    const sec = buscarSeccion(selArea.value, selCat.value, selSec.value);
+    const info = document.getElementById('agInfo');
+    if(!sec){ info.textContent = ''; return; }
+    info.textContent = seccionEstaOrdenada(sec)
+      ? 'Se ubicará en orden alfabético dentro de la lista.'
+      : 'Se ubicará al final de esta sección.';
+  }
+  selArea.onchange = llenarCats; selCat.onchange = llenarSecs; selSec.onchange = actualizarInfo;
+  llenarCats();
+  pintarListaAgregados();
+
+  async function guardar(){
+    const msg = document.getElementById('agMsg');
+    const nombre = document.getElementById('agNombre').value.trim().replace(/\s+/g, ' ');
+    msg.style.color = '#b3261e';
+    if(!nombre){ msg.textContent = 'Escribí el nombre del ítem.'; return; }
+    const area = selArea.value, cat = selCat.value;
+    const sec = buscarSeccion(area, cat, selSec.value);
+    if(!sec){ msg.textContent = 'No se encontró la sección.'; return; }
+    const repetido = sec.items.some(i => i.type === 'product' && comparadorNombres.compare(i.name, nombre) === 0);
+    if(repetido){ msg.textContent = 'Ese ítem ya existe en esta sección.'; return; }
+    const id = 'x_' + Date.now().toString(36) + Math.random().toString(36).slice(2, 5);
+    const btn = document.getElementById('agGuardar');
+    btn.disabled = true;
+    try{
+      await db.collection(COLECCION_EXTRA).doc(id).set({
+        area, cat, seccion: sec.title, name: nombre, ts: Date.now(), por: currentUser.email
+      });
+      msg.style.color = '#2e7d32';
+      msg.textContent = 'Agregado: ' + nombre;
+      document.getElementById('agNombre').value = '';
+      document.getElementById('agNombre').focus();
+      actualizarInfo();
+    }catch(e){
+      msg.textContent = 'No se pudo guardar. Revisá tu conexión o los permisos en Firebase.';
+      console.warn(e);
+    }
+    btn.disabled = false;
+  }
+  document.getElementById('agGuardar').onclick = guardar;
+  document.getElementById('agNombre').addEventListener('keydown', e=>{ if(e.key === 'Enter') guardar(); });
+}
+
+function pintarListaAgregados(){
+  const ul = document.getElementById('agLista');
+  if(!ul) return;
+  ul.innerHTML = '';
+  const docs = Object.values(EXTRA_DOCS).sort((a,b)=>(b.ts||0)-(a.ts||0));
+  if(!docs.length){
+    const li = document.createElement('li'); li.style.color = '#8a7a63'; li.textContent = 'Todavía no agregaste ninguno.'; ul.appendChild(li);
+    return;
+  }
+  docs.forEach(d=>{
+    const li = document.createElement('li');
+    const span = document.createElement('span');
+    span.textContent = d.name + ' · ' + AREAS[d.area].label + ' / ' + d.cat;
+    const x = document.createElement('button');
+    x.textContent = 'Quitar';
+    x.style.cssText = 'border:none;background:#f3dcd8;color:#b3261e;border-radius:6px;padding:4px 8px;font-size:.7rem;cursor:pointer;';
+    x.onclick = async ()=>{
+      if(!confirm('¿Quitar "' + d.name + '" de la lista?\nLos pedidos ya cargados con este ítem no se borran de la base de datos.')) return;
+      try{ await db.collection(COLECCION_EXTRA).doc(d.id).delete(); }
+      catch(e){ alert('No se pudo quitar. Revisá tu conexión.'); }
+    };
+    li.appendChild(span); li.appendChild(x);
+    ul.appendChild(li);
+  });
 }
 
 // ---------- Guardado (con espera corta para no escribir en cada tecla) ----------
@@ -1500,12 +1712,51 @@ document.getElementById('btnExcel').addEventListener('click', ()=>generarExcel(c
 document.getElementById('orientacionPDF').addEventListener('change', (e)=>{ orientacionPDF = e.target.value; });
 actualizarBotonesCombinar();
 
-// ---------- Instalación como app + service worker ----------
+// ---------- Instalación como app + actualización automática ----------
 if('serviceWorker' in navigator){
   window.addEventListener('load', ()=>{
     navigator.serviceWorker.register('service-worker.js').catch(()=>{});
   });
 }
+
+// Detecta si se publicó una versión nueva de la app mientras estaba abierta (por ejemplo al volver a ella
+// desde otra app). Si no estás escribiendo nada, se recarga sola; si estás escribiendo, avisa con una barra.
+(function(){
+  let firmaInicial = null, ultimaRevision = 0;
+  async function firmaActual(){
+    const r = await fetch('index.html', { cache: 'no-store' });
+    const txt = await r.text();
+    return (r.headers.get('etag') || r.headers.get('last-modified') || '') + '|' + txt.length;
+  }
+  function escribiendo(){
+    const a = document.activeElement;
+    return !!(a && (a.tagName === 'INPUT' || a.tagName === 'TEXTAREA' || a.tagName === 'SELECT'));
+  }
+  function avisar(){
+    if(document.getElementById('barraNuevaVersion')) return;
+    const b = document.createElement('div');
+    b.id = 'barraNuevaVersion';
+    b.style.cssText = 'position:fixed;left:12px;right:12px;bottom:14px;z-index:9000;background:#5f3c1f;color:#fff;padding:12px 14px;border-radius:12px;display:flex;align-items:center;justify-content:space-between;gap:10px;box-shadow:0 4px 14px rgba(0,0,0,.3);font-size:.95rem;';
+    b.innerHTML = '<span>Hay una versión nueva de la app</span><button style="background:#fff;color:#5f3c1f;border:0;border-radius:8px;padding:8px 12px;font-weight:700;">Actualizar</button>';
+    b.querySelector('button').onclick = ()=>location.reload();
+    document.body.appendChild(b);
+  }
+  async function revisar(){
+    if(!navigator.onLine) return;
+    if(Date.now() - ultimaRevision < 30000) return; // como máximo cada 30 s
+    ultimaRevision = Date.now();
+    try{
+      const f = await firmaActual();
+      if(firmaInicial === null){ firmaInicial = f; return; }
+      if(f !== firmaInicial){
+        if(escribiendo()) avisar(); else location.reload();
+      }
+    }catch(e){}
+  }
+  window.addEventListener('load', ()=> setTimeout(revisar, 3000));
+  document.addEventListener('visibilitychange', ()=>{ if(document.visibilityState === 'visible') revisar(); });
+  setInterval(()=>{ if(document.visibilityState === 'visible') revisar(); }, 5*60*1000);
+})();
 </script>
 </body>
 </html>
