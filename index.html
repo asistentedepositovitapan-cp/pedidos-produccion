@@ -976,50 +976,92 @@ function renderResumen(){
 }
 
 // PDF del resumen: misma presentación que se ve en pantalla (categoría, producto a la izquierda, cantidad a la derecha).
+// Siempre en UNA sola hoja: si no entra en una columna, pasa a dos columnas y, si hace falta, achica un poco la letra.
 function generarPDFResumen(){
   if(!window.jspdf){ alert('No se pudo cargar el generador de PDF. Revisá tu conexión e intentá de nuevo.'); return; }
   const bucket = ensureDateBucket(currentDate);
   const { jsPDF } = window.jspdf;
   const doc = new jsPDF({ unit:'pt', format:'a4', orientation:'portrait' });
   const pageW = doc.internal.pageSize.getWidth(), pageH = doc.internal.pageSize.getHeight();
-  const margin = 40, anchoCol = pageW - margin*2;
+  const margin = 40, anchoCol = pageW - margin*2, separacion = 26;
   const email = currentUser ? currentUser.email : '';
   const sucursal = SUCURSAL_POR_USUARIO[email] || email || '';
   const MARRON = [95,60,31], NARANJA = [199,107,63], GRIS = [138,122,99], LINEA = [226,211,186];
 
   let y = margin;
-  function encabezado(){
-    doc.setFont('helvetica','bold'); doc.setFontSize(16); doc.setTextColor(...MARRON);
-    doc.text('Resumen del pedido', margin, y + 12);
-    doc.setFont('helvetica','normal'); doc.setFontSize(9); doc.setTextColor(...GRIS);
-    doc.text('VitaPan', pageW - margin, y + 10, { align:'right' });
-    if(sucursal) doc.text(sucursal, pageW - margin, y + 22, { align:'right' });
-    y += 30;
-    doc.text('Fecha: ' + currentDate + ' · Área: ' + AREAS[currentArea].label + ' · productos con pedido cargado', margin, y);
-    y += 16;
-  }
-  encabezado();
+  doc.setFont('helvetica','bold'); doc.setFontSize(16); doc.setTextColor(...MARRON);
+  doc.text('Resumen del pedido', margin, y + 12);
+  doc.setFont('helvetica','normal'); doc.setFontSize(9); doc.setTextColor(...GRIS);
+  doc.text('VitaPan', pageW - margin, y + 10, { align:'right' });
+  if(sucursal) doc.text(sucursal, pageW - margin, y + 22, { align:'right' });
+  y += 30;
+  doc.text('Fecha: ' + currentDate + ' · Área: ' + AREAS[currentArea].label + ' · productos con pedido cargado', margin, y);
+  y += 12;
+  const disponible = pageH - margin - y;
 
-  const alto = 20;
+  // Lista plana de bloques: título de categoría o producto.
+  const bloques = [];
   categoriasActuales().forEach(cat=>{
     const entries = Object.entries(bucket[cat]).filter(([id,e])=> e.p !== '' && Number(e.p) > 0);
     if(entries.length === 0) return;
-    if(y + 30 + alto > pageH - margin){ doc.addPage(); y = margin; }
-    y += 12;
-    doc.setFont('helvetica','bold'); doc.setFontSize(10); doc.setTextColor(...MARRON);
-    doc.text(cat.toUpperCase(), margin, y);
-    y += 6;
+    bloques.push({ tipo:'cat', cat });
     entries.forEach(([id, e])=>{
-      if(y + alto > pageH - margin){ doc.addPage(); y = margin; }
       const nombre = (PRODUCT_BY_ID[id] && PRODUCT_BY_ID[id].name) || id;
-      y += alto;
-      doc.setFont('helvetica','normal'); doc.setFontSize(11); doc.setTextColor(43,33,23);
-      const txt = doc.splitTextToSize(nombre, anchoCol - 60)[0];
-      doc.text(txt, margin, y - 6);
-      doc.setFont('helvetica','bold'); doc.setTextColor(...NARANJA);
-      doc.text(String(e.p), pageW - margin, y - 6, { align:'right' });
-      doc.setDrawColor(...LINEA); doc.setLineWidth(0.6);
-      doc.line(margin, y, pageW - margin, y);
+      bloques.push({ tipo:'item', cat, nombre, cant: String(e.p) });
+    });
+  });
+  if(bloques.length === 0){ alert('No hay pedidos cargados para exportar.'); return; }
+
+  const altoBloque = (b, s) => b.tipo === 'cat' ? 22*s : 20*s;
+  const altoLista = (arr, s) => arr.reduce((t,b)=> t + altoBloque(b, s), 0);
+
+  // Reparte en n columnas (corte único para 2 columnas). Si una categoría sigue en la 2.ª columna, repite su título.
+  function planificar(ncols, s){
+    if(ncols === 1) return { cols:[bloques], alto: altoLista(bloques, s) };
+    let mejor = null;
+    for(let i=1; i<bloques.length; i++){
+      if(bloques[i-1].tipo === 'cat') continue;           // no dejar un título solo al final de la columna
+      const c1 = bloques.slice(0, i);
+      let c2 = bloques.slice(i);
+      if(c2[0].tipo === 'item') c2 = [{ tipo:'cat', cat:c2[0].cat }].concat(c2);
+      const alto = Math.max(altoLista(c1, s), altoLista(c2, s));
+      if(!mejor || alto < mejor.alto) mejor = { cols:[c1, c2], alto };
+    }
+    return mejor || { cols:[bloques], alto: altoLista(bloques, s) };
+  }
+
+  let plan = planificar(1, 1), escala = 1;
+  if(plan.alto > disponible){
+    escala = 1;
+    plan = planificar(2, escala);
+    while(plan.alto > disponible && escala > 0.3){
+      escala = Math.round((escala - 0.02) * 100) / 100;
+      plan = planificar(2, escala);
+    }
+  }
+  const ncols = plan.cols.length;
+  const colW = (anchoCol - separacion*(ncols-1)) / ncols;
+  const fuente = Math.max(5.5, 11*escala), fuenteCat = Math.max(6, 10*escala);
+
+  plan.cols.forEach((col, ci)=>{
+    const x0 = margin + ci*(colW + separacion), x1 = x0 + colW;
+    let yy = y;
+    col.forEach(b=>{
+      if(b.tipo === 'cat'){
+        yy += 16*escala;
+        doc.setFont('helvetica','bold'); doc.setFontSize(fuenteCat); doc.setTextColor(...MARRON);
+        doc.text(b.cat.toUpperCase(), x0, yy);
+        yy += 6*escala;
+      } else {
+        yy += 20*escala;
+        doc.setFont('helvetica','normal'); doc.setFontSize(fuente); doc.setTextColor(43,33,23);
+        const lineas = doc.splitTextToSize(b.nombre, colW - 36);
+        doc.text(lineas.length > 1 ? lineas[0].replace(/\s+\S*$/, '') + '…' : lineas[0], x0, yy - 6*escala);
+        doc.setFont('helvetica','bold'); doc.setTextColor(...NARANJA);
+        doc.text(b.cant, x1, yy - 6*escala, { align:'right' });
+        doc.setDrawColor(...LINEA); doc.setLineWidth(0.6);
+        doc.line(x0, yy, x1, yy);
+      }
     });
   });
 
