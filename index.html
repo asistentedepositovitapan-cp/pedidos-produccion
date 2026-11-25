@@ -180,7 +180,7 @@
     font-size:.85rem;
     line-height:1.25;
   }
-  .prod-row input[type=number]{
+  .prod-row input[type=number], .prod-row input.campo-texto{
     width:56px;
     padding:6px 4px;
     text-align:center;
@@ -188,7 +188,8 @@
     border-radius:8px;
     font-size:.85rem;
   }
-  .prod-row input[type=number]:focus{
+  .prod-row input.campo-texto{width:74px;}
+  .prod-row input[type=number]:focus, .prod-row input.campo-texto:focus{
     outline:2px solid var(--acento);
     border-color:var(--acento);
   }
@@ -336,6 +337,7 @@
   </div>
   <div class="date-row" style="margin-top:6px;">
     <span id="userBadge" style="font-size:.72rem;opacity:.85;flex:1;"></span>
+    <button id="btnEditarItem" style="display:none;border:none;background:rgba(255,255,255,0.18);color:#fff;border-radius:8px;padding:5px 10px;font-size:.7rem;font-weight:700;cursor:pointer;">Editar ítems</button>
     <button id="btnAgregarItem" style="display:none;border:none;background:var(--masa);color:var(--corteza-dark);border-radius:8px;padding:5px 10px;font-size:.7rem;font-weight:700;cursor:pointer;">+ Agregar ítem</button>
     <button id="btnLogout" style="border:none;background:rgba(255,255,255,0.18);color:#fff;border-radius:8px;padding:5px 10px;font-size:.7rem;cursor:pointer;">Salir</button>
   </div>
@@ -427,6 +429,26 @@ let inputRefs = {};  // { id: {sInput, pInput, row} } -- solo de la pestaña/fec
 let unsubItems = null;
 let orientacionPDF = 'p'; // 'p' vertical, 'l' horizontal
 const debounceTimers = {};
+
+// Pestañas donde Stock y Pedido admiten letras y números (por ejemplo "1u", "2kg", "1,5 kg", "1 cajón").
+const CATEGORIAS_TEXTO = { deposito: ['Frutas&Verduras'] };
+function esCategoriaTexto(cat, area){ return (CATEGORIAS_TEXTO[area || currentArea] || []).includes(cat); }
+// ¿Este valor cuenta como "pedido cargado"? En pestañas de texto: cualquier texto salvo vacío o cero ("0", "0kg").
+function esPedido(cat, valor, area){
+  const v = String(valor === undefined || valor === null ? '' : valor).trim();
+  if(v === '') return false;
+  if(esCategoriaTexto(cat, area)){
+    const n = parseFloat(v.replace(',', '.'));
+    return !(n === 0);
+  }
+  return Number(v) > 0;
+}
+// Valor para Excel: si es un número puro va como número; si tiene letras, como texto.
+function valorParaExcel(valor){
+  const v = String(valor === undefined || valor === null ? '' : valor).trim();
+  if(v === '') return null;
+  return /^-?\d+([.,]\d+)?$/.test(v) ? Number(v.replace(',', '.')) : v;
+}
 
 function ensureDateBucket(fecha){
   if(!data[currentArea]) data[currentArea] = {};
@@ -555,6 +577,10 @@ async function iniciarApp(){
 // (y también en las reglas de Firestore, ver firestore.rules).
 const ADMIN_EMAILS = ['gralsantos@vitapan.com'];
 const COLECCION_EXTRA = 'catalogo_extra';
+const COLECCION_EDICIONES = 'catalogo_ediciones';   // cambios de nombre sobre ítems que ya venían en el catálogo
+const EDIT_DOCS = {};            // id -> { name }
+// Se recuerda el nombre original de cada ítem del catálogo, para poder volver a él si se quita una edición.
+Object.values(AREAS).forEach(a => Object.values(a.catalog).forEach(secs => secs.forEach(s => s.items.forEach(i => { if(i.type === 'product') i.base = i.name; }))));
 const EXTRA_DOCS = {};          // id -> datos del ítem agregado
 let unsubCatalogoExtra = null;
 const comparadorNombres = new Intl.Collator('es', { sensitivity:'base', numeric:true });
@@ -563,8 +589,46 @@ function esAdmin(){
   return !!(currentUser && currentUser.email && ADMIN_EMAILS.includes(currentUser.email.toLowerCase()));
 }
 function actualizarBotonAdmin(){
-  const b = document.getElementById('btnAgregarItem');
-  if(b){ b.style.display = esAdmin() ? '' : 'none'; b.onclick = abrirAgregarItem; }
+  const ba = document.getElementById('btnAgregarItem'), be = document.getElementById('btnEditarItem');
+  if(!ba || !be) return;
+  ba.style.display = be.style.display = esAdmin() ? '' : 'none';
+  ba.onclick = ()=> pedirClave('Agregar ítem').then(ok=>{ if(ok) abrirAgregarItem(); });
+  be.onclick = ()=> pedirClave('Editar ítems').then(ok=>{ if(ok) abrirEditarItems(); });
+}
+
+// Clave para agregar o editar ítems (se pide cada vez). Aviso: esto frena el uso accidental; la protección real
+// es que solo el correo de administrador puede escribir en la base (ver firestore.rules).
+const CLAVE_ITEMS_HASH = '6a63879c29cf88cd1a1ee0e6f7da6cffd672561d8ccad1d49cd3f534d2a61183';
+async function hashClave(txt){
+  const buf = await crypto.subtle.digest('SHA-256', new TextEncoder().encode('vitapan-items|' + txt));
+  return Array.from(new Uint8Array(buf)).map(b=>b.toString(16).padStart(2,'0')).join('');
+}
+function pedirClave(titulo){
+  return new Promise(resolve=>{
+    const root = document.getElementById('modalRoot');
+    root.innerHTML =
+      '<div class="modal-overlay" id="ovClave"><div class="modal">' +
+      '<h2>' + titulo + '</h2><div class="modal-sub">Ingresá la clave para continuar.</div>' +
+      '<input id="claveInput" type="password" inputmode="numeric" autocomplete="off" maxlength="12" placeholder="Clave" ' +
+      'style="width:100%;padding:10px;border:1px solid #d9c9a8;border-radius:8px;font-size:1.1rem;letter-spacing:.3em;text-align:center;">' +
+      '<div id="claveMsg" style="color:#b3261e;font-size:.8rem;min-height:1.2em;margin:6px 0;"></div>' +
+      '<button class="modal-close" id="claveOk" style="margin-top:0;">Continuar</button>' +
+      '<button class="modal-close" id="claveNo" style="background:#8a7a63;">Cancelar</button>' +
+      '</div></div>';
+    const inp = document.getElementById('claveInput');
+    inp.focus();
+    const cerrar = (r)=>{ root.innerHTML = ''; resolve(r); };
+    async function verificar(){
+      let ok = false;
+      try{ ok = (await hashClave(inp.value.trim())) === CLAVE_ITEMS_HASH; }catch(e){ ok = false; }
+      if(ok){ cerrar(true); }
+      else { document.getElementById('claveMsg').textContent = 'Clave incorrecta.'; inp.value = ''; inp.focus(); }
+    }
+    document.getElementById('claveOk').onclick = verificar;
+    document.getElementById('claveNo').onclick = ()=> cerrar(false);
+    inp.addEventListener('keydown', e=>{ if(e.key === 'Enter') verificar(); });
+    document.getElementById('ovClave').addEventListener('click', e=>{ if(e.target.id === 'ovClave') cerrar(false); });
+  });
 }
 
 // Regla de ubicación: si la sección ya está en orden alfabético, el ítem nuevo entra en su lugar alfabético;
@@ -593,10 +657,23 @@ function buscarSeccion(area, cat, titulo){
 
 // Reconstruye el catálogo: quita lo agregado antes y lo vuelve a colocar según lo que hay en la base.
 function aplicarCatalogoExtra(){
+  // 1) volver al catálogo original (sin ítems agregados ni nombres editados)
   Object.values(AREAS).forEach(a => Object.values(a.catalog).forEach(secs => secs.forEach(s => {
     s.items = s.items.filter(i => !i.extra);
+    s.items.forEach(i => { if(i.type === 'product' && i.base !== undefined) i.name = i.base; });
   })));
   Object.keys(PRODUCT_BY_ID).forEach(id => { if(PRODUCT_BY_ID[id].extra) delete PRODUCT_BY_ID[id]; });
+  // 2) aplicar nombres editados; si la lista estaba en orden alfabético, se vuelve a ordenar con el nombre nuevo
+  Object.values(AREAS).forEach((a, ai) => Object.values(a.catalog).forEach(secs => secs.forEach(s => {
+    const estabaOrdenada = seccionEstaOrdenada(s);
+    let cambio = false;
+    s.items.forEach(i => {
+      if(i.type === 'product' && EDIT_DOCS[i.id] && EDIT_DOCS[i.id].name){ i.name = EDIT_DOCS[i.id].name; cambio = true; }
+    });
+    if(cambio && estabaOrdenada) s.items.sort((x, y) => comparadorNombres.compare(x.name, y.name));
+    s.items.forEach(i => { if(i.type === 'product' && PRODUCT_BY_ID[i.id]) PRODUCT_BY_ID[i.id].name = i.name; });
+  })));
+  // 3) agregar los ítems nuevos
   Object.values(EXTRA_DOCS).sort((a,b)=>(a.ts||0)-(b.ts||0)).forEach(d=>{
     const sec = buscarSeccion(d.area, d.cat, d.seccion);
     if(!sec) return;
@@ -616,25 +693,37 @@ function redibujarSeguro(){
   renderContent();
 }
 
+let unsubEdiciones = null;
 function suscribirseACatalogoExtra(){
   if(unsubCatalogoExtra){ unsubCatalogoExtra(); unsubCatalogoExtra = null; }
+  if(unsubEdiciones){ unsubEdiciones(); unsubEdiciones = null; }
   return new Promise(resolve=>{
-    let primera = true;
+    let pendientes = 2;
+    const listo = ()=>{ pendientes--; if(pendientes === 0) resolve(); };
+    const refrescar = ()=>{
+      aplicarCatalogoExtra();
+      if(pendientes > 0) return;
+      redibujarSeguro();
+      if(document.getElementById('ovAgregar')) pintarListaAgregados();
+      if(document.getElementById('ovEditar') && typeof pintarListaEditar === 'function') pintarListaEditar();
+    };
+    let p1 = true, p2 = true;
     unsubCatalogoExtra = db.collection(COLECCION_EXTRA).onSnapshot(snap=>{
       snap.docChanges().forEach(ch=>{
         if(ch.type === 'removed') delete EXTRA_DOCS[ch.doc.id];
         else EXTRA_DOCS[ch.doc.id] = Object.assign({ id: ch.doc.id }, ch.doc.data());
       });
-      aplicarCatalogoExtra();
-      if(primera){ primera = false; resolve(); }
-      else {
-        redibujarSeguro();
-        if(document.getElementById('ovAgregar')) pintarListaAgregados();
-      }
-    }, err=>{
-      console.warn('No se pudo leer ' + COLECCION_EXTRA, err);
-      if(primera){ primera = false; resolve(); }
-    });
+      if(p1){ p1 = false; listo(); }
+      refrescar();
+    }, err=>{ console.warn('No se pudo leer ' + COLECCION_EXTRA, err); if(p1){ p1 = false; listo(); } });
+    unsubEdiciones = db.collection(COLECCION_EDICIONES).onSnapshot(snap=>{
+      snap.docChanges().forEach(ch=>{
+        if(ch.type === 'removed') delete EDIT_DOCS[ch.doc.id];
+        else EDIT_DOCS[ch.doc.id] = Object.assign({ id: ch.doc.id }, ch.doc.data());
+      });
+      if(p2){ p2 = false; listo(); }
+      refrescar();
+    }, err=>{ console.warn('No se pudo leer ' + COLECCION_EDICIONES, err); if(p2){ p2 = false; listo(); } });
   });
 }
 
@@ -756,6 +845,118 @@ function pintarListaAgregados(){
   });
 }
 
+// ---------- Editar ítems (nuevos y ya existentes) ----------
+function abrirEditarItems(){
+  if(!esAdmin()) return;
+  const root = document.getElementById('modalRoot');
+  const estSel = 'width:100%;padding:9px;border:1px solid #d9c9a8;border-radius:8px;font-size:.9rem;background:#fff;margin-bottom:8px;';
+  root.innerHTML =
+    '<div class="modal-overlay" id="ovEditar"><div class="modal">' +
+    '<h2>Editar ítems</h2>' +
+    '<div class="modal-sub">Cambiá el nombre de un ítem. Sus pedidos y stock ya cargados se mantienen.</div>' +
+    '<select id="edArea" style="' + estSel + '"></select>' +
+    '<select id="edCat" style="' + estSel + '"></select>' +
+    '<input id="edBuscar" type="text" placeholder="Buscar ítem…" autocomplete="off" style="' + estSel + '">' +
+    '<div id="edMsg" style="font-size:.8rem;min-height:1.2em;margin-bottom:4px;"></div>' +
+    '<ul id="edLista"></ul>' +
+    '<button class="modal-close" id="edCerrar" style="background:#8a7a63;">Cerrar</button>' +
+    '</div></div>';
+  document.getElementById('ovEditar').addEventListener('click', e=>{ if(e.target.id === 'ovEditar') root.innerHTML = ''; });
+  document.getElementById('edCerrar').onclick = ()=>{ root.innerHTML = ''; };
+  const selArea = document.getElementById('edArea'), selCat = document.getElementById('edCat');
+  Object.keys(AREAS).forEach(a=>{
+    const o = document.createElement('option'); o.value = a; o.textContent = AREAS[a].label;
+    if(a === currentArea) o.selected = true; selArea.appendChild(o);
+  });
+  function llenarCats(){
+    selCat.innerHTML = '';
+    Object.keys(AREAS[selArea.value].catalog).forEach(c=>{
+      const o = document.createElement('option'); o.value = c; o.textContent = c;
+      if(selArea.value === currentArea && c === currentCat) o.selected = true; selCat.appendChild(o);
+    });
+    pintarListaEditar();
+  }
+  selArea.onchange = llenarCats;
+  selCat.onchange = pintarListaEditar;
+  document.getElementById('edBuscar').oninput = pintarListaEditar;
+  llenarCats();
+}
+
+function pintarListaEditar(){
+  const ul = document.getElementById('edLista');
+  if(!ul) return;
+  const enEdicion = ul.querySelector('input');
+  if(enEdicion && document.activeElement === enEdicion) return;   // no pisar lo que se está escribiendo
+  const area = document.getElementById('edArea').value, cat = document.getElementById('edCat').value;
+  const filtro = document.getElementById('edBuscar').value.trim().toLowerCase();
+  ul.innerHTML = '';
+  (AREAS[area].catalog[cat] || []).forEach(sec=>{
+    const items = sec.items.filter(i => i.type === 'product' && (!filtro || i.name.toLowerCase().includes(filtro)));
+    if(!items.length) return;
+    if((AREAS[area].catalog[cat]).length > 1){
+      const h = document.createElement('li');
+      h.style.cssText = 'display:block;font-weight:700;font-size:.72rem;color:#8a7a63;text-transform:uppercase;border:none;padding-top:10px;';
+      h.textContent = sec.title; ul.appendChild(h);
+    }
+    items.forEach(it=> ul.appendChild(filaEditable(area, cat, sec, it)));
+  });
+  if(!ul.children.length){ const li = document.createElement('li'); li.style.color = '#8a7a63'; li.textContent = 'No hay ítems.'; ul.appendChild(li); }
+}
+
+function filaEditable(area, cat, sec, it){
+  const li = document.createElement('li');
+  li.style.cssText = 'align-items:center;gap:8px;';
+  const nombre = document.createElement('span');
+  nombre.style.flex = '1';
+  nombre.textContent = it.name + (it.extra ? '  (nuevo)' : (EDIT_DOCS[it.id] ? '  (editado)' : ''));
+  const btn = document.createElement('button');
+  btn.textContent = 'Editar';
+  btn.style.cssText = 'border:none;background:#efe4cf;color:#5f3c1f;border-radius:6px;padding:5px 10px;font-size:.72rem;cursor:pointer;';
+  btn.onclick = ()=>{
+    li.innerHTML = '';
+    const inp = document.createElement('input');
+    inp.type = 'text'; inp.value = it.name; inp.maxLength = 80;
+    inp.style.cssText = 'flex:1;min-width:0;padding:7px;border:1px solid #d9c9a8;border-radius:6px;font-size:.85rem;';
+    const ok = document.createElement('button');
+    ok.textContent = 'Guardar';
+    ok.style.cssText = 'border:none;background:var(--acento);color:#fff;border-radius:6px;padding:6px 10px;font-size:.72rem;cursor:pointer;';
+    const no = document.createElement('button');
+    no.textContent = 'Cancelar';
+    no.style.cssText = 'border:none;background:#e5e0d6;color:#5f3c1f;border-radius:6px;padding:6px 8px;font-size:.72rem;cursor:pointer;';
+    li.appendChild(inp); li.appendChild(ok); li.appendChild(no);
+    inp.focus(); inp.select();
+    no.onclick = pintarListaEditar;
+    const guardar = async ()=>{
+      const msg = document.getElementById('edMsg');
+      const nuevo = inp.value.trim().replace(/\s+/g, ' ');
+      msg.style.color = '#b3261e';
+      if(!nuevo){ msg.textContent = 'El nombre no puede quedar vacío.'; return; }
+      if(nuevo === it.name){ pintarListaEditar(); return; }
+      const repetido = sec.items.some(i => i.type === 'product' && i.id !== it.id && comparadorNombres.compare(i.name, nuevo) === 0);
+      if(repetido){ msg.textContent = 'Ya existe un ítem con ese nombre en esta sección.'; return; }
+      ok.disabled = true;
+      try{
+        if(it.extra){
+          await db.collection(COLECCION_EXTRA).doc(it.id).update({ name: nuevo });
+        } else if(nuevo === it.base){
+          await db.collection(COLECCION_EDICIONES).doc(it.id).delete();
+        } else {
+          await db.collection(COLECCION_EDICIONES).doc(it.id).set({ area, cat, name: nuevo, ts: Date.now(), por: currentUser.email });
+        }
+        msg.style.color = '#2e7d32'; msg.textContent = 'Guardado: ' + nuevo;
+      }catch(e){
+        msg.textContent = 'No se pudo guardar. Revisá tu conexión o los permisos en Firebase.';
+        console.warn(e);
+        ok.disabled = false;
+      }
+    };
+    ok.onclick = guardar;
+    inp.addEventListener('keydown', e=>{ if(e.key === 'Enter') guardar(); if(e.key === 'Escape') pintarListaEditar(); });
+  };
+  li.appendChild(nombre); li.appendChild(btn);
+  return li;
+}
+
 // ---------- Guardado (con espera corta para no escribir en cada tecla) ----------
 function guardarCampo(cat, id, name, campo, valor){
   const bucket = ensureDateBucket(currentDate);
@@ -838,7 +1039,7 @@ function updateFooterCount(){
   const bucket = ensureDateBucket(currentDate);
   let count = 0;
   categoriasActuales().forEach(cat=>{
-    Object.values(bucket[cat]).forEach(e=>{ if(e.p !== '' && Number(e.p) > 0) count++; });
+    Object.values(bucket[cat]).forEach(e=>{ if(esPedido(cat, e.p)) count++; });
   });
   document.getElementById('footerCount').textContent = count + (count===1 ? ' producto con pedido' : ' productos con pedido');
 }
@@ -851,7 +1052,7 @@ function actualizarCeldaEnPantalla(area, fecha, cat, id){
   const entry = (bucket && bucket[cat] && bucket[cat][id]) || { s:'', p:'' };
   if(document.activeElement !== refs.sInput) refs.sInput.value = entry.s;
   if(document.activeElement !== refs.pInput) refs.pInput.value = entry.p;
-  refs.row.classList.toggle('has-pedido', Number(entry.p) > 0);
+  refs.row.classList.toggle('has-pedido', esPedido(cat, entry.p, area));
 }
 
 function renderContent(){
@@ -890,7 +1091,7 @@ function renderContent(){
       const entry = existente || { s: (stockPrevio ? stockPrevio.s : ''), p: '' };
 
       const row = document.createElement('div');
-      row.className = 'prod-row' + (Number(entry.p) > 0 ? ' has-pedido' : '');
+      row.className = 'prod-row' + (esPedido(currentCat, entry.p) ? ' has-pedido' : '');
 
       const nameEl = document.createElement('div');
       nameEl.className = 'prod-name';
@@ -901,7 +1102,8 @@ function renderContent(){
       sWrap.className = 'field-wrap';
       sWrap.innerHTML = '<span>Stock</span>';
       const sInput = document.createElement('input');
-      sInput.type = 'number'; sInput.min = '0'; sInput.inputMode='decimal';
+      if(esCategoriaTexto(currentCat)){ sInput.type = 'text'; sInput.inputMode='text'; sInput.maxLength = 14; sInput.classList.add('campo-texto'); }
+      else { sInput.type = 'number'; sInput.min = '0'; sInput.inputMode='decimal'; }
       sInput.value = entry.s;
       sInput.addEventListener('input', ()=>{
         guardarCampo(currentCat, id, name, 's', sInput.value);
@@ -913,10 +1115,11 @@ function renderContent(){
       pWrap.className = 'field-wrap';
       pWrap.innerHTML = '<span>Pedido</span>';
       const pInput = document.createElement('input');
-      pInput.type = 'number'; pInput.min = '0'; pInput.inputMode='decimal';
+      if(esCategoriaTexto(currentCat)){ pInput.type = 'text'; pInput.inputMode='text'; pInput.maxLength = 14; pInput.classList.add('campo-texto'); }
+      else { pInput.type = 'number'; pInput.min = '0'; pInput.inputMode='decimal'; }
       pInput.value = entry.p;
       pInput.addEventListener('input', ()=>{
-        row.classList.toggle('has-pedido', Number(pInput.value) > 0);
+        row.classList.toggle('has-pedido', esPedido(currentCat, pInput.value));
         guardarCampo(currentCat, id, name, 'p', pInput.value);
         updateFooterCount();
       });
@@ -948,7 +1151,7 @@ function renderResumen(){
 
   let totalItems = 0;
   categoriasActuales().forEach(cat=>{
-    const entries = Object.entries(bucket[cat]).filter(([id,e])=> e.p !== '' && Number(e.p) > 0);
+    const entries = Object.entries(bucket[cat]).filter(([id,e])=> esPedido(cat, e.p));
     if(entries.length === 0) return;
     html += '<div class="cat-h">' + cat + '</div><ul>';
     entries.forEach(([id, e])=>{
@@ -1002,7 +1205,7 @@ function generarPDFResumen(){
   // Lista plana de bloques: título de categoría o producto.
   const bloques = [];
   categoriasActuales().forEach(cat=>{
-    const entries = Object.entries(bucket[cat]).filter(([id,e])=> e.p !== '' && Number(e.p) > 0);
+    const entries = Object.entries(bucket[cat]).filter(([id,e])=> esPedido(cat, e.p));
     if(entries.length === 0) return;
     bloques.push({ tipo:'cat', cat });
     entries.forEach(([id, e])=>{
@@ -1479,8 +1682,8 @@ function escribirSeccionExcel(ws, cat, section, bucket, colOffset, filaInicio){
       const sCell = ws.getCell(fila, colOffset+1);
       const pCell = ws.getCell(fila, colOffset+2);
       nombreCell.value = item.name;
-      sCell.value = e.s !== '' ? Number(e.s) : null;
-      pCell.value = e.p !== '' ? Number(e.p) : null;
+      sCell.value = valorParaExcel(e.s);
+      pCell.value = valorParaExcel(e.p);
       sCell.alignment = { horizontal:'center' };
       pCell.alignment = { horizontal:'center' };
       [nombreCell, sCell, pCell].forEach(cl=> cl.border = bordeFino);
@@ -1493,8 +1696,8 @@ function escribirSeccionExcel(ws, cat, section, bucket, colOffset, filaInicio){
 
 function ajustarAnchosExcel(ws, colOffset, anchoMax){
   ws.getColumn(colOffset).width = Math.min(anchoMax + 2, 45);
-  ws.getColumn(colOffset+1).width = 7;
-  ws.getColumn(colOffset+2).width = 7;
+  ws.getColumn(colOffset+1).width = 10;
+  ws.getColumn(colOffset+2).width = 10;
 }
 
 // Bloque de una categoría completa (encabezado + todas sus secciones) para el Excel de una sola pestaña.
